@@ -1,0 +1,9 @@
+{
+  "name": "controle-despesas-campo",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Leitura de recibos/notas fiscais em lote com tabela de despesas, subtotais semanais e relatorio fotografico.",
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0"
+  }
+}
