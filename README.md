@@ -1,96 +1,87 @@
-# Controle de Despesas de Campo — versão Netlify
+# Despesas de Viagem — FORM 189 (Netlify)
 
-Front-end estático (React + Babel via CDN, sem etapa de build) + duas Netlify Functions:
+Aplicativo que lê recibos, notas fiscais e cupons fiscais em lote, monta a tabela de
+despesas e gera automaticamente os formulários oficiais em Excel + o relatório
+fotográfico em PDF.
 
-- `netlify/functions/records.mjs` — lê/grava a lista de lançamentos no **Netlify Blobs**
-  (store `expense-tracker`, chave `records`).
-- `netlify/functions/extract.mjs` — recebe a imagem/PDF do recibo e chama a API da
-  Anthropic **do lado do servidor**, usando a variável de ambiente `ANTHROPIC_API_KEY`
-  (a chave nunca fica exposta no navegador).
+## Os dois fluxos
 
-## Estrutura
+**Com adiantamento**
+1. Preenche as despesas previstas → baixa a **Solicitação de Adiantamento** (antes da viagem)
+2. Envia os comprovantes → baixa a **Prestação de Contas** + **relatório em PDF**
 
-```
-netlify.toml
-package.json
-public/
-  index.html
-  app.jsx
-netlify/
-  functions/
-    records.mjs
-    extract.mjs
-```
+**Sem adiantamento**
+- Envia os comprovantes → baixa a **Solicitação de Reembolso** + **relatório em PDF**
 
-## 1. Configurar a chave da API
+## O que fica armazenado (Netlify Blobs)
 
-No painel da Netlify: **Site settings → Environment variables → Add a variable**
+Store `expense-tracker`:
 
-- Key: `ANTHROPIC_API_KEY`
-- Value: sua chave gerada em https://console.anthropic.com/settings/keys
+| Chave | Conteúdo |
+|---|---|
+| `despesas.xlsx` | Tabela de lançamentos, como planilha Excel de verdade |
+| `file:<id>` / `file-meta:<id>` | Arquivo original de cada comprovante (imagem/PDF) |
+| `profile` | Dados fixos do solicitante (nome, cargo, CPF, banco, agência, conta, PIX) |
+| `rateio-presets` | Usinas, centros de custo, projetos, fase e percentuais recorrentes |
 
-Sem essa variável, a leitura de recibos retorna erro (a tabela manual continua funcionando).
+Como os arquivos ficam no servidor, a pré-visualização e o relatório fotográfico
+continuam funcionando depois de fechar ou recarregar a página.
 
-## 2. Netlify Blobs
+## Funções (`netlify/functions/`)
 
-Não precisa de nenhuma configuração extra: sites publicados na Netlify já têm o Netlify
-Blobs disponível automaticamente para as Functions (via contexto injetado). Não é preciso
-criar token nem `siteID` manualmente.
+- `extract.mjs` — chama a API da Anthropic (server-side, chave em `ANTHROPIC_API_KEY`)
+  para ler o comprovante e arquiva o original nos Blobs.
+- `records.mjs` — lê/grava a tabela de despesas como `.xlsx`.
+- `files.mjs` — serve (`GET`) e apaga (`DELETE`) os arquivos dos comprovantes.
+- `profile.mjs` — dados fixos do solicitante.
+- `rateio.mjs` — presets de rateio.
+- `generate-report.mjs` — preenche os modelos oficiais em `templates/` preservando
+  integralmente layout, fórmulas, bordas e a logomarca do formulário.
 
-> Observação: a store `expense-tracker` é única para o site — todas as pessoas que
-> acessarem o site compartilham a mesma lista de lançamentos. Se isso não for desejado,
-> proteja o site com uma senha em **Site settings → Visitor access**, ou peça para eu
-> adicionar autenticação (Netlify Identity) e separar os dados por usuário.
+## Modelos (`netlify/functions/templates/`)
 
-## 3. Subir para o GitHub
+Gerados a partir dos seus arquivos originais, apenas com os campos variáveis em branco:
 
-Dentro da pasta do projeto (já contém `.gitignore`):
+| Arquivo | Aba | Rateio | Lançamentos |
+|---|---|---|---|
+| `tpl_solicitacao_adiantamento.xlsx` | ADIANTAMENTO | 10 linhas | 9 (previstas: histórico + valor) |
+| `tpl_prestacao_contas.xlsx` | PRESTAÇÃO CONTAS ADIANTAMENTO | 6 linhas | 22 |
+| `tpl_reembolso.xlsx` | FORM 189 | 6 linhas | 22 |
 
-```bash
-cd controle-despesas-campo
-git init
-git add .
-git commit -m "Controle de despesas de campo"
-```
+> O formulário de reembolso original tinha 4 linhas de despesa; foi ampliado para 22
+> replicando a formatação das linhas existentes e ajustando o `SUB TOTAL`. Todas as
+> fórmulas foram recalculadas e validadas sem erros.
 
-Crie um repositório vazio no GitHub (sem README/licença, para não gerar conflito):
-**github.com → New repository** — por exemplo `controle-despesas-campo`.
+## Deploy pelo navegador
 
-Depois conecte e envie:
-```bash
-git branch -M main
-git remote add origin https://github.com/SEU_USUARIO/controle-despesas-campo.git
-git push -u origin main
-```
-(Ou use `gh repo create controle-despesas-campo --private --source=. --push` se tiver o GitHub CLI.)
+1. **GitHub** → New repository (vazio) → na página do repo, clique em
+   "uploading an existing file" e arraste esta pasta inteira → Commit changes.
+2. **Netlify** → Add new site → Import an existing project → Deploy with GitHub →
+   selecione o repositório. O `netlify.toml` já define tudo (publish `public`,
+   functions `netlify/functions`, e inclui os modelos `.xlsx` no bundle).
+3. **Site settings → Environment variables** → adicione `ANTHROPIC_API_KEY`
+   (chave criada em console.anthropic.com → API Keys, com billing ativo).
+4. **Deploys → Trigger deploy** para aplicar a variável.
 
-## 4. Conectar o repositório à Netlify
+Depois disso, cada commit na `main` gera um novo deploy automático.
 
-No painel da Netlify: **Add new site → Import an existing project → Deploy with GitHub**,
-autorize o acesso e selecione o repositório. A Netlify detecta o `netlify.toml`
-automaticamente:
+## Primeiro uso
 
-- Build command: (vazio — não precisa)
-- Publish directory: `public`
-- Functions directory: `netlify/functions`
+1. Aba **Cadastros** → preencha os dados do solicitante e os presets de rateio → Salvar.
+   (Feito uma vez; entra sozinho em todos os formulários daí em diante.)
+2. Aba **Despesas** → arraste os comprovantes em lote → confira as linhas marcadas com ⚠.
+3. Aba **Gerar formulários** → escolha o fluxo → baixe a planilha e o relatório.
 
-Ela roda `npm install` sozinha antes de empacotar as Functions (para instalar
-`@netlify/blobs`). A partir daí, todo `git push` para `main` faz um novo deploy
-automático — não precisa mais usar a CLI nem reenviar arquivos manualmente.
-
-Não esqueça do passo 1 (`ANTHROPIC_API_KEY` em Site settings → Environment variables) —
-ela é por site, então precisa ser configurada de novo se você recriar o site.
-
-## 5. Testar localmente
+## Testar localmente
 
 ```bash
 npm install
 netlify dev
 ```
-O `netlify dev` sobe o site estático e as Functions juntos (com Blobs funcionando
-localmente também), normalmente em `http://localhost:8888`.
 
-## Sobre o modelo usado
+## Observações
 
-A function `extract.mjs` chama o modelo `claude-sonnet-5`. Se quiser usar outro modelo
-com visão (ex.: `claude-opus-4-8`), troque o valor de `model` nesse arquivo.
+- Sem autenticação, os dados são compartilhados por quem acessar o site. Para restringir,
+  use **Site settings → Visitor access** (senha) ou Netlify Identity.
+- Almoço e jantar acima de R$ 35,00 aparecem sinalizados na tabela.
+- O modelo usado na leitura é `claude-sonnet-5` (ajustável em `extract.mjs`).

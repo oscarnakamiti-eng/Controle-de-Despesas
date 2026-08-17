@@ -10,7 +10,6 @@ const TIPO_STYLE = {
   "Materiais e Serviços": "bg-slate-200 text-slate-800 border-slate-400",
 };
 
-// --- ícones (SVG simples, sem dependências externas) ---
 function Icon({ children, size = 16, className = "", ...props }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -32,6 +31,9 @@ const ImageIcon = (p) => <Icon {...p}><rect x="3" y="3" width="18" height="18" r
 const FileTextIcon = (p) => <Icon {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></Icon>;
 const ArrowLeftIcon = (p) => <Icon {...p}><path d="m12 19-7-7 7-7" /><path d="M19 12H5" /></Icon>;
 const EyeIcon = (p) => <Icon {...p}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></Icon>;
+const SheetIcon = (p) => <Icon {...p}><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18" /><path d="M3 15h18" /><path d="M9 3v18" /></Icon>;
+const UserIcon = (p) => <Icon {...p}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></Icon>;
+const DownloadIcon = (p) => <Icon {...p}><path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" /></Icon>;
 
 function pad2(n) { return String(n).padStart(2, "0"); }
 function formatDatePtBr(date) { return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${date.getFullYear()}`; }
@@ -46,14 +48,12 @@ function parseDatePtBr(str) {
 function getMonday(date) {
   const d = new Date(date);
   const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
+  d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
   d.setHours(0, 0, 0, 0);
   return d;
 }
 function formatValor(num) {
-  const n = Number(num) || 0;
-  return n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return (Number(num) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 function parseValorInput(raw) {
   if (typeof raw === "number") return raw;
@@ -72,30 +72,40 @@ function fileToBase64(file) {
   });
 }
 function makeId() { return `rec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; }
+function fileUrl(id) { return `/.netlify/functions/files?id=${encodeURIComponent(id)}`; }
 
 // --- chamadas às Netlify Functions ---
-async function loadRecordsFromServer() {
-  const res = await fetch("/.netlify/functions/records");
-  if (!res.ok) throw new Error(`Falha ao carregar lançamentos (HTTP ${res.status})`);
-  const data = await res.json();
-  return data.records || [];
+async function apiGet(fn) {
+  const res = await fetch(`/.netlify/functions/${fn}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
 }
-async function saveRecordsToServer(records) {
-  await fetch("/.netlify/functions/records", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ records }),
+async function apiPost(fn, payload) {
+  const res = await fetch(`/.netlify/functions/${fn}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
   });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
 }
-async function callExtract(base64, mediaType, isPdf) {
+async function callExtract(id, base64, mediaType, isPdf, fileName) {
   const res = await fetch("/.netlify/functions/extract", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ base64, mediaType, isPdf }),
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, base64, mediaType, isPdf, fileName }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || `Falha na leitura (HTTP ${res.status})`);
-  return data.parsed;
+  return data;
+}
+
+function Field({ label, value, onChange, placeholder, className = "" }) {
+  return (
+    <label className={`block ${className}`}>
+      <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">{label}</span>
+      <input value={value || ""} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+        className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500" />
+    </label>
+  );
 }
 
 function EditRow({ draft, setDraft, onSave, onCancel }) {
@@ -113,19 +123,17 @@ function EditRow({ draft, setDraft, onSave, onCancel }) {
         </select>
       </td>
       <td className="px-3 py-2 align-top">
-        <input value={draft.obs} onChange={(e) => setDraft({ ...draft, obs: e.target.value })}
-          placeholder="Observações"
+        <input value={draft.obs} onChange={(e) => setDraft({ ...draft, obs: e.target.value })} placeholder="Histórico / observações"
           className="w-full rounded border border-slate-300 px-2 py-1 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500" />
       </td>
       <td className="px-3 py-2 align-top">
-        <input value={draft.valor} onChange={(e) => setDraft({ ...draft, valor: e.target.value })}
-          placeholder="0,00" inputMode="decimal"
+        <input value={draft.valor} onChange={(e) => setDraft({ ...draft, valor: e.target.value })} placeholder="0,00" inputMode="decimal"
           className="w-28 rounded border border-slate-300 px-2 py-1 text-right text-sm font-mono-num focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500" />
       </td>
       <td className="px-3 py-2 align-top">
         <div className="flex items-center gap-1">
-          <button onClick={onSave} title="Salvar" className="rounded p-1.5 text-emerald-700 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"><CheckIcon size={16} /></button>
-          <button onClick={onCancel} title="Cancelar" className="rounded p-1.5 text-slate-500 hover:bg-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-400"><XIcon size={16} /></button>
+          <button onClick={onSave} title="Salvar" className="rounded p-1.5 text-emerald-700 hover:bg-emerald-100"><CheckIcon size={16} /></button>
+          <button onClick={onCancel} title="Cancelar" className="rounded p-1.5 text-slate-500 hover:bg-slate-200"><XIcon size={16} /></button>
         </div>
       </td>
     </tr>
@@ -133,7 +141,10 @@ function EditRow({ draft, setDraft, onSave, onCancel }) {
 }
 
 function App() {
+  const [view, setView] = useState("tabela"); // tabela | relatorio | perfil | gerar
   const [records, setRecords] = useState([]);
+  const [profile, setProfile] = useState({});
+  const [presets, setPresets] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(null);
   const [queue, setQueue] = useState([]);
@@ -142,128 +153,157 @@ function App() {
   const [editDraft, setEditDraft] = useState(null);
   const [addingNew, setAddingNew] = useState(false);
   const [newDraft, setNewDraft] = useState(null);
-  const [showReport, setShowReport] = useState(false);
-  const [previewImage, setPreviewImage] = useState(null);
+  const [previewId, setPreviewId] = useState(null);
+  const [toast, setToast] = useState(null);
   const fileInputRef = useRef(null);
   const dropRef = useRef(null);
+
+  // formulário de geração
+  const [fluxo, setFluxo] = useState("reembolso"); // "adiantamento" | "reembolso"
+  const [motivo, setMotivo] = useState("");
+  const [valorAdiantamento, setValorAdiantamento] = useState("");
+  const [rateio, setRateio] = useState([]);
+  const [previsoes, setPrevisoes] = useState([]);
+  const [gerando, setGerando] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
-        const recs = await loadRecordsFromServer();
-        setRecords(recs);
+        const [r, p, rp] = await Promise.all([apiGet("records"), apiGet("profile"), apiGet("rateio")]);
+        setRecords(r.records || []);
+        setProfile(p.profile || {});
+        setPresets(rp.presets || []);
+        setRateio(rp.presets || []);
       } catch (e) {
         setLoadError(String(e.message || e));
-      } finally {
-        setLoaded(true);
-      }
+      } finally { setLoaded(true); }
     })();
   }, []);
 
   useEffect(() => {
     if (!loaded) return;
-    const toStore = records.map(({ imageDataUrl, ...rest }) => rest);
-    saveRecordsToServer(toStore).catch(() => {});
+    apiPost("records", { records }).catch(() => {});
   }, [records, loaded]);
 
-  const addRecordFromExtraction = useCallback((parsed, fileName, imageDataUrl) => {
-    let needsReview = false;
-    let dateObj = parseDatePtBr(parsed && parsed.data);
-    if (!dateObj) { dateObj = new Date(); needsReview = true; }
-    let tipo = parsed && parsed.tipo;
-    if (!TIPOS.includes(tipo)) { tipo = "Materiais e Serviços"; needsReview = true; }
-    let valor = Number(parsed && parsed.valor);
-    if (isNaN(valor)) { valor = 0; needsReview = true; }
-    const obs = (parsed && parsed.observacoes) || (needsReview ? "Confira os dados extraídos" : "");
-    const record = {
-      id: makeId(), data: formatDatePtBr(dateObj), tipo, obs, valor, fileName,
-      imageDataUrl: imageDataUrl || null, status: needsReview ? "revisar" : "ok",
-    };
-    setRecords((prev) => [...prev, record]);
-  }, []);
+  const showToast = (msg, isError) => {
+    setToast({ msg, isError });
+    setTimeout(() => setToast(null), 4000);
+  };
 
   const processFiles = useCallback(async (fileList) => {
     const files = Array.from(fileList || []);
     if (files.length === 0) return;
-    const items = files.map((f) => ({ id: makeId(), name: f.name, status: "pendente" }));
+    const items = files.map((f) => ({ qid: makeId(), name: f.name, status: "pendente" }));
     setQueue((prev) => [...prev, ...items]);
     setProcessing(true);
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      const qid = items[i].id;
-      setQueue((prev) => prev.map((q) => (q.id === qid ? { ...q, status: "lendo" } : q)));
+      const qid = items[i].qid;
+      setQueue((prev) => prev.map((q) => (q.qid === qid ? { ...q, status: "lendo" } : q)));
       try {
         const base64 = await fileToBase64(file);
         const isPdf = file.type === "application/pdf";
-        const mediaType = file.type || "image/jpeg";
-        const parsed = await callExtract(base64, mediaType, isPdf);
-        const imageDataUrl = isPdf ? null : `data:${mediaType};base64,${base64}`;
-        addRecordFromExtraction(parsed, file.name, imageDataUrl);
-        setQueue((prev) => prev.map((q) => (q.id === qid ? { ...q, status: "ok" } : q)));
+        const mediaType = isPdf ? "application/pdf" : (file.type || "image/jpeg");
+        const recId = makeId();
+        const { parsed, fileStored } = await callExtract(recId, base64, mediaType, isPdf, file.name);
+
+        let needsReview = false;
+        let dateObj = parseDatePtBr(parsed && parsed.data);
+        if (!dateObj) { dateObj = new Date(); needsReview = true; }
+        let tipo = parsed && parsed.tipo;
+        if (!TIPOS.includes(tipo)) { tipo = "Materiais e Serviços"; needsReview = true; }
+        let valor = Number(parsed && parsed.valor);
+        if (isNaN(valor)) { valor = 0; needsReview = true; }
+
+        setRecords((prev) => [...prev, {
+          id: recId, data: formatDatePtBr(dateObj), tipo,
+          obs: (parsed && parsed.observacoes) || (needsReview ? "Confira os dados extraídos" : ""),
+          valor, fileName: file.name, mediaType, hasFile: !!fileStored,
+          status: needsReview ? "revisar" : "ok",
+        }]);
+        setQueue((prev) => prev.map((q) => (q.qid === qid ? { ...q, status: "ok" } : q)));
       } catch (err) {
-        setQueue((prev) => prev.map((q) => (q.id === qid ? { ...q, status: "erro", error: String(err.message || err) } : q)));
+        setQueue((prev) => prev.map((q) => (q.qid === qid ? { ...q, status: "erro", error: String(err.message || err) } : q)));
       }
     }
     setProcessing(false);
-  }, [addRecordFromExtraction]);
+  }, []);
 
   const onFileInputChange = (e) => { processFiles(e.target.files); e.target.value = ""; };
-  const onDrop = (e) => {
-    e.preventDefault();
-    dropRef.current && dropRef.current.classList.remove("border-amber-500", "bg-amber-50");
-    processFiles(e.dataTransfer.files);
-  };
-  const onDragOver = (e) => { e.preventDefault(); dropRef.current && dropRef.current.classList.add("border-amber-500", "bg-amber-50"); };
-  const onDragLeave = () => { dropRef.current && dropRef.current.classList.remove("border-amber-500", "bg-amber-50"); };
+  const onDrop = (e) => { e.preventDefault(); dropRef.current?.classList.remove("border-amber-500", "bg-amber-50"); processFiles(e.dataTransfer.files); };
+  const onDragOver = (e) => { e.preventDefault(); dropRef.current?.classList.add("border-amber-500", "bg-amber-50"); };
+  const onDragLeave = () => dropRef.current?.classList.remove("border-amber-500", "bg-amber-50");
 
-  const startEdit = (record) => {
-    setEditingId(record.id);
-    setEditDraft({ data: record.data, tipo: record.tipo, obs: record.obs, valor: formatValor(record.valor) });
-  };
-  const cancelEdit = () => { setEditingId(null); setEditDraft(null); };
+  const startEdit = (r) => { setEditingId(r.id); setEditDraft({ data: r.data, tipo: r.tipo, obs: r.obs, valor: formatValor(r.valor) }); };
   const saveEdit = (id) => {
-    const dateObj = parseDatePtBr(editDraft.data);
-    setRecords((prev) => prev.map((r) => {
-      if (r.id !== id) return r;
-      return {
-        ...r,
-        data: dateObj ? formatDatePtBr(dateObj) : r.data,
-        tipo: TIPOS.includes(editDraft.tipo) ? editDraft.tipo : r.tipo,
-        obs: editDraft.obs,
-        valor: parseValorInput(editDraft.valor),
-        status: dateObj ? "ok" : "revisar",
-      };
+    const d = parseDatePtBr(editDraft.data);
+    setRecords((prev) => prev.map((r) => r.id !== id ? r : {
+      ...r, data: d ? formatDatePtBr(d) : r.data,
+      tipo: TIPOS.includes(editDraft.tipo) ? editDraft.tipo : r.tipo,
+      obs: editDraft.obs, valor: parseValorInput(editDraft.valor), status: d ? "ok" : "revisar",
     }));
     setEditingId(null); setEditDraft(null);
   };
-  const deleteRecord = (id) => {
-    if (window.confirm("Excluir este lançamento? Esta ação não pode ser desfeita.")) {
-      setRecords((prev) => prev.filter((r) => r.id !== id));
-    }
+  const deleteRecord = async (r) => {
+    if (!window.confirm("Excluir este lançamento e o arquivo do comprovante? Esta ação não pode ser desfeita.")) return;
+    setRecords((prev) => prev.filter((x) => x.id !== r.id));
+    if (r.hasFile) { try { await fetch(fileUrl(r.id), { method: "DELETE" }); } catch {} }
   };
-  const startAddNew = () => { setAddingNew(true); setNewDraft({ data: formatDatePtBr(new Date()), tipo: TIPOS[0], obs: "", valor: "0,00" }); };
-  const cancelAddNew = () => { setAddingNew(false); setNewDraft(null); };
   const saveAddNew = () => {
-    const dateObj = parseDatePtBr(newDraft.data);
-    const record = {
-      id: makeId(), data: dateObj ? formatDatePtBr(dateObj) : formatDatePtBr(new Date()),
+    const d = parseDatePtBr(newDraft.data);
+    setRecords((prev) => [...prev, {
+      id: makeId(), data: d ? formatDatePtBr(d) : formatDatePtBr(new Date()),
       tipo: TIPOS.includes(newDraft.tipo) ? newDraft.tipo : TIPOS[0], obs: newDraft.obs,
-      valor: parseValorInput(newDraft.valor), fileName: null, imageDataUrl: null,
-      status: dateObj ? "ok" : "revisar",
-    };
-    setRecords((prev) => [...prev, record]);
+      valor: parseValorInput(newDraft.valor), fileName: null, mediaType: null, hasFile: false,
+      status: d ? "ok" : "revisar",
+    }]);
     setAddingNew(false); setNewDraft(null);
   };
-  const clearQueue = () => setQueue([]);
 
+  const saveProfile = async () => {
+    try { await apiPost("profile", { profile }); showToast("Dados do solicitante salvos."); }
+    catch (e) { showToast(`Erro ao salvar: ${e.message}`, true); }
+  };
+  const savePresets = async () => {
+    try { await apiPost("rateio", { presets }); showToast("Presets de rateio salvos."); }
+    catch (e) { showToast(`Erro ao salvar: ${e.message}`, true); }
+  };
+
+  const baixarPlanilha = async (tipo) => {
+    setGerando(true);
+    try {
+      const res = await fetch("/.netlify/functions/generate-report", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tipo, profile, motivo, rateio,
+          valorAdiantamento: parseValorInput(valorAdiantamento),
+          records: sorted.map((r) => ({ data: r.data, tipo: r.tipo, obs: r.obs, valor: r.valor })),
+          previsoes: previsoes.map((p) => ({ obs: p.obs, valor: parseValorInput(p.valor) })),
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = { "solicitacao-adiantamento": "solicitacao-adiantamento.xlsx", "prestacao-contas": "prestacao-contas-adiantamento.xlsx", "reembolso": "solicitacao-reembolso.xlsx" }[tipo];
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      showToast(`Erro ao gerar planilha: ${e.message}`, true);
+    } finally { setGerando(false); }
+  };
+
+  // --- dados derivados ---
   const enriched = records.map((r) => ({ ...r, dateObj: parseDatePtBr(r.data) || new Date() }));
   const sorted = [...enriched].sort((a, b) => a.dateObj - b.dateObj);
   const weeksMap = new Map();
   for (const r of sorted) {
-    const monday = getMonday(r.dateObj);
-    const key = monday.getTime();
-    if (!weeksMap.has(key)) weeksMap.set(key, { monday, rows: [] });
+    const key = getMonday(r.dateObj).getTime();
+    if (!weeksMap.has(key)) weeksMap.set(key, { monday: getMonday(r.dateObj), rows: [] });
     weeksMap.get(key).rows.push(r);
   }
   let cumulative = 0;
@@ -275,7 +315,15 @@ function App() {
   });
   const totalGeral = weeks.reduce((s, w) => s + w.subtotal, 0);
   const reviewCount = records.filter((r) => r.status === "revisar").length;
-  const reportRecords = enriched.filter((r) => r.imageDataUrl).sort((a, b) => a.dateObj - b.dateObj);
+  const reportRecords = sorted.filter((r) => r.hasFile);
+  const totalPrevisto = previsoes.reduce((s, p) => s + parseValorInput(p.valor), 0);
+
+  const NavBtn = ({ id, children }) => (
+    <button onClick={() => setView(id)}
+      className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${view === id ? "bg-amber-400 text-slate-900" : "text-slate-300 hover:bg-slate-800"}`}>
+      {children}
+    </button>
+  );
 
   return (
     <div className="min-h-screen bg-stone-100 text-slate-800">
@@ -297,14 +345,20 @@ function App() {
         <div className="mx-auto max-w-5xl px-4 py-5 sm:px-6">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
-              <p className="font-display text-xs uppercase tracking-[0.2em] text-amber-400">Controle de campo</p>
-              <h1 className="font-display text-2xl font-bold sm:text-3xl">Despesas de Comissionamento</h1>
+              <p className="font-display text-xs uppercase tracking-[0.2em] text-amber-400">FORM 189 · Grupo Tangipar</p>
+              <h1 className="font-display text-2xl font-bold sm:text-3xl">Despesas de Viagem</h1>
             </div>
             <div className="text-right">
               <p className="text-xs uppercase tracking-wide text-slate-400">Total acumulado</p>
               <p className="font-mono-num text-2xl font-semibold text-amber-400 sm:text-3xl">{formatValor(totalGeral)}</p>
             </div>
           </div>
+          <nav className="mt-4 flex flex-wrap gap-1">
+            <NavBtn id="tabela">Despesas</NavBtn>
+            <NavBtn id="gerar">Gerar formulários</NavBtn>
+            <NavBtn id="relatorio">Relatório fotográfico</NavBtn>
+            <NavBtn id="perfil">Cadastros</NavBtn>
+          </nav>
         </div>
         <div className="h-1 w-full bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500" />
       </header>
@@ -312,20 +366,21 @@ function App() {
       {loadError && (
         <div className="no-print mx-auto max-w-5xl px-4 pt-4 sm:px-6">
           <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            Não foi possível carregar os lançamentos salvos ({loadError}). Verifique se a função "records" e o Netlify Blobs estão funcionando.
+            Não foi possível carregar os dados salvos ({loadError}).
           </div>
         </div>
       )}
 
-      {!showReport ? (
+      {/* ===================== TABELA ===================== */}
+      {view === "tabela" && (
         <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
           <div ref={dropRef} onDrop={onDrop} onDragOver={onDragOver} onDragLeave={onDragLeave}
             className="no-print flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-slate-300 bg-white px-4 py-8 text-center transition-colors">
             <UploadIcon className="text-slate-400" size={28} />
             <p className="text-sm text-slate-600">Arraste recibos, notas fiscais ou cupons fiscais aqui, ou envie em lote</p>
-            <p className="text-xs text-slate-400">Imagens (JPG, PNG) e PDF são aceitos</p>
-            <button onClick={() => fileInputRef.current && fileInputRef.current.click()}
-              className="mt-2 inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500">
+            <p className="text-xs text-slate-400">Imagens (JPG, PNG) e PDF — os arquivos ficam guardados para o relatório</p>
+            <button onClick={() => fileInputRef.current?.click()}
+              className="mt-2 inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
               <UploadIcon size={16} /> Selecionar arquivos
             </button>
             <input ref={fileInputRef} type="file" multiple accept="image/*,.pdf" onChange={onFileInputChange} className="hidden" />
@@ -337,11 +392,11 @@ function App() {
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Leitura em lote {processing && <span className="text-amber-600">(processando…)</span>}
                 </p>
-                {!processing && <button onClick={clearQueue} className="text-xs text-slate-400 hover:text-slate-600">Limpar lista</button>}
+                {!processing && <button onClick={() => setQueue([])} className="text-xs text-slate-400 hover:text-slate-600">Limpar lista</button>}
               </div>
               <ul className="max-h-40 space-y-1 overflow-y-auto text-sm">
                 {queue.map((q) => (
-                  <li key={q.id} className="flex items-center gap-2">
+                  <li key={q.qid} className="flex items-center gap-2">
                     {q.status === "lendo" && <LoaderIcon className="animate-spin text-amber-500" size={14} />}
                     {q.status === "pendente" && <LoaderIcon className="text-slate-300" size={14} />}
                     {q.status === "ok" && <CheckIcon className="text-emerald-600" size={14} />}
@@ -355,14 +410,10 @@ function App() {
           )}
 
           <div className="no-print mt-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <button onClick={startAddNew} className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-amber-500">
-                <PlusIcon size={15} /> Adicionar lançamento
-              </button>
-              <button onClick={() => setShowReport(true)} className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-amber-500">
-                <ImageIcon size={15} /> Relatório fotográfico
-              </button>
-            </div>
+            <button onClick={() => { setAddingNew(true); setNewDraft({ data: formatDatePtBr(new Date()), tipo: TIPOS[0], obs: "", valor: "0,00" }); }}
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              <PlusIcon size={15} /> Adicionar lançamento
+            </button>
             {reviewCount > 0 && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800">
                 <AlertIcon size={13} /> {reviewCount} lançamento(s) a revisar
@@ -374,15 +425,13 @@ function App() {
             <table className="min-w-full divide-y divide-slate-200 text-sm">
               <thead className="bg-slate-50">
                 <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  <th className="px-3 py-2">Data</th>
-                  <th className="px-3 py-2">Tipo</th>
-                  <th className="px-3 py-2">Observações</th>
-                  <th className="px-3 py-2 text-right">Valor</th>
+                  <th className="px-3 py-2">Data</th><th className="px-3 py-2">Tipo</th>
+                  <th className="px-3 py-2">Histórico</th><th className="px-3 py-2 text-right">Valor</th>
                   <th className="no-print px-3 py-2">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {addingNew && newDraft && <EditRow draft={newDraft} setDraft={setNewDraft} onSave={saveAddNew} onCancel={cancelAddNew} />}
+                {addingNew && newDraft && <EditRow draft={newDraft} setDraft={setNewDraft} onSave={saveAddNew} onCancel={() => { setAddingNew(false); setNewDraft(null); }} />}
                 {weeks.length === 0 && !addingNew && (
                   <tr><td colSpan={5} className="px-3 py-10 text-center text-sm text-slate-400">
                     Nenhum lançamento ainda. Envie comprovantes acima ou adicione manualmente.
@@ -390,13 +439,11 @@ function App() {
                 )}
                 {weeks.map((w) => (
                   <Fragment key={w.monday.getTime()}>
-                    <tr><td colSpan={5} className="bg-slate-800 px-3 py-1.5 font-display text-xs uppercase tracking-wide text-amber-300">
-                      Semana de {w.label}
-                    </td></tr>
+                    <tr><td colSpan={5} className="bg-slate-800 px-3 py-1.5 font-display text-xs uppercase tracking-wide text-amber-300">Semana de {w.label}</td></tr>
                     {w.rows.map((r) => {
                       const overLimit = (r.tipo === "Almoço" || r.tipo === "Jantar") && r.valor > 35;
                       if (editingId === r.id && editDraft) {
-                        return <EditRow key={r.id} draft={editDraft} setDraft={setEditDraft} onSave={() => saveEdit(r.id)} onCancel={cancelEdit} />;
+                        return <EditRow key={r.id} draft={editDraft} setDraft={setEditDraft} onSave={() => saveEdit(r.id)} onCancel={() => { setEditingId(null); setEditDraft(null); }} />;
                       }
                       return (
                         <tr key={r.id} className="hover:bg-stone-50">
@@ -416,11 +463,9 @@ function App() {
                           <td className="whitespace-nowrap px-3 py-2 text-right font-mono-num">{formatValor(r.valor)}</td>
                           <td className="no-print whitespace-nowrap px-3 py-2">
                             <div className="flex items-center gap-1">
-                              {r.imageDataUrl && (
-                                <button onClick={() => setPreviewImage(r.imageDataUrl)} title="Ver comprovante" className="rounded p-1.5 text-slate-500 hover:bg-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-400"><EyeIcon size={15} /></button>
-                              )}
-                              <button onClick={() => startEdit(r)} title="Editar" className="rounded p-1.5 text-slate-500 hover:bg-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-400"><PencilIcon size={15} /></button>
-                              <button onClick={() => deleteRecord(r.id)} title="Excluir" className="rounded p-1.5 text-red-600 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-500"><TrashIcon size={15} /></button>
+                              {r.hasFile && <button onClick={() => setPreviewId(r.id)} title="Ver comprovante" className="rounded p-1.5 text-slate-500 hover:bg-slate-200"><EyeIcon size={15} /></button>}
+                              <button onClick={() => startEdit(r)} title="Editar" className="rounded p-1.5 text-slate-500 hover:bg-slate-200"><PencilIcon size={15} /></button>
+                              <button onClick={() => deleteRecord(r)} title="Excluir" className="rounded p-1.5 text-red-600 hover:bg-red-100"><TrashIcon size={15} /></button>
                             </div>
                           </td>
                         </tr>
@@ -450,18 +495,199 @@ function App() {
               )}
             </table>
           </div>
-
-          <p className="no-print mt-3 text-xs text-slate-400">
-            Os lançamentos ficam salvos no Netlify Blobs (compartilhado por quem acessar este site). O relatório
-            fotográfico usa os arquivos enviados nesta sessão do navegador — se recarregar a página, reenvie os
-            comprovantes para gerar o relatório novamente.
-          </p>
         </main>
-      ) : (
+      )}
+
+      {/* ===================== GERAR FORMULÁRIOS ===================== */}
+      {view === "gerar" && (
+        <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
+          <div className="rounded-lg border border-slate-200 bg-white p-4">
+            <h2 className="font-display text-lg font-bold">Qual é o fluxo?</h2>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <button onClick={() => setFluxo("adiantamento")}
+                className={`rounded-lg border-2 p-4 text-left transition-colors ${fluxo === "adiantamento" ? "border-amber-500 bg-amber-50" : "border-slate-200 hover:border-slate-300"}`}>
+                <p className="font-display font-semibold">Com adiantamento</p>
+                <p className="mt-1 text-xs text-slate-600">1. Solicitação de adiantamento (antes da viagem)<br />2. Prestação de contas + relatório em PDF</p>
+              </button>
+              <button onClick={() => setFluxo("reembolso")}
+                className={`rounded-lg border-2 p-4 text-left transition-colors ${fluxo === "reembolso" ? "border-amber-500 bg-amber-50" : "border-slate-200 hover:border-slate-300"}`}>
+                <p className="font-display font-semibold">Sem adiantamento</p>
+                <p className="mt-1 text-xs text-slate-600">Solicitação de reembolso + relatório em PDF</p>
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Motivo da solicitação</span>
+              <textarea value={motivo} onChange={(e) => setMotivo(e.target.value)} rows={2}
+                placeholder="Ex.: CUSTOS DE REFEIÇÃO, ABASTECIMENTO DO VEÍCULO, GERADOR E RETROESCAVADEIRA DA OBRA, MATERIAIS NECESSÁRIOS PARA OBRA"
+                className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500" />
+            </label>
+
+            <div className="mt-4">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Rateio</span>
+                <button onClick={() => setRateio([...rateio, { centroCusto: "", nCentroCusto: "", projeto: "", nProjeto: "", fase: "17", percentual: "" }])}
+                  className="text-xs font-medium text-amber-700 hover:text-amber-900">+ linha</button>
+              </div>
+              {rateio.length === 0 && <p className="text-xs text-slate-400">Nenhuma linha. Cadastre presets em "Cadastros" ou adicione aqui.</p>}
+              {rateio.map((r, i) => (
+                <div key={i} className="mb-1.5 grid grid-cols-2 gap-1.5 sm:grid-cols-7">
+                  <input value={r.centroCusto} onChange={(e) => setRateio(rateio.map((x, j) => j === i ? { ...x, centroCusto: e.target.value } : x))} placeholder="Centro de custo" className="col-span-2 rounded border border-slate-300 px-2 py-1 text-xs" />
+                  <input value={r.nCentroCusto} onChange={(e) => setRateio(rateio.map((x, j) => j === i ? { ...x, nCentroCusto: e.target.value } : x))} placeholder="Nº CC" className="rounded border border-slate-300 px-2 py-1 text-xs" />
+                  <input value={r.projeto} onChange={(e) => setRateio(rateio.map((x, j) => j === i ? { ...x, projeto: e.target.value } : x))} placeholder="Projeto" className="rounded border border-slate-300 px-2 py-1 text-xs" />
+                  <input value={r.nProjeto} onChange={(e) => setRateio(rateio.map((x, j) => j === i ? { ...x, nProjeto: e.target.value } : x))} placeholder="Nº projeto" className="rounded border border-slate-300 px-2 py-1 text-xs" />
+                  <input value={r.fase} onChange={(e) => setRateio(rateio.map((x, j) => j === i ? { ...x, fase: e.target.value } : x))} placeholder="Fase" className="rounded border border-slate-300 px-2 py-1 text-xs" />
+                  <div className="flex gap-1">
+                    <input value={r.percentual} onChange={(e) => setRateio(rateio.map((x, j) => j === i ? { ...x, percentual: e.target.value } : x))} placeholder="%" className="w-full rounded border border-slate-300 px-2 py-1 text-xs" />
+                    <button onClick={() => setRateio(rateio.filter((_, j) => j !== i))} className="rounded p-1 text-red-600 hover:bg-red-100"><TrashIcon size={13} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {fluxo === "adiantamento" ? (
+            <>
+              <div className="mt-4 rounded-lg border-2 border-slate-300 bg-white p-4">
+                <p className="font-display text-sm font-bold uppercase tracking-wide text-slate-500">Passo 1 — Antes da viagem</p>
+                <h3 className="font-display text-lg font-bold">Solicitação de adiantamento</h3>
+                <div className="mt-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Despesas previstas (até 9)</span>
+                    <button onClick={() => setPrevisoes([...previsoes, { obs: "", valor: "" }])} className="text-xs font-medium text-amber-700 hover:text-amber-900">+ item</button>
+                  </div>
+                  {previsoes.map((p, i) => (
+                    <div key={i} className="mb-1.5 flex gap-1.5">
+                      <input value={p.obs} onChange={(e) => setPrevisoes(previsoes.map((x, j) => j === i ? { ...x, obs: e.target.value } : x))} placeholder="Histórico da despesa prevista" className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm" />
+                      <input value={p.valor} onChange={(e) => setPrevisoes(previsoes.map((x, j) => j === i ? { ...x, valor: e.target.value } : x))} placeholder="0,00" inputMode="decimal" className="w-28 rounded border border-slate-300 px-2 py-1 text-right text-sm font-mono-num" />
+                      <button onClick={() => setPrevisoes(previsoes.filter((_, j) => j !== i))} className="rounded p-1.5 text-red-600 hover:bg-red-100"><TrashIcon size={14} /></button>
+                    </div>
+                  ))}
+                  <div className="mt-2 flex items-center justify-between border-t border-slate-200 pt-2 text-sm">
+                    <span className="font-medium text-slate-600">Total do adiantamento</span>
+                    <span className="font-mono-num font-semibold">{formatValor(totalPrevisto)}</span>
+                  </div>
+                </div>
+                <button onClick={() => baixarPlanilha("solicitacao-adiantamento")} disabled={gerando}
+                  className="mt-3 inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">
+                  <DownloadIcon size={16} /> Baixar solicitação de adiantamento
+                </button>
+              </div>
+
+              <div className="mt-4 rounded-lg border-2 border-amber-400 bg-white p-4">
+                <p className="font-display text-sm font-bold uppercase tracking-wide text-amber-600">Passo 2 — Depois da viagem</p>
+                <h3 className="font-display text-lg font-bold">Prestação de contas</h3>
+                <p className="mt-1 text-sm text-slate-600">Usa os {sorted.length} lançamento(s) da tabela de despesas (total {formatValor(totalGeral)}).</p>
+                <label className="mt-3 block max-w-xs">
+                  <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Valor que foi adiantado</span>
+                  <input value={valorAdiantamento} onChange={(e) => setValorAdiantamento(e.target.value)} placeholder="0,00" inputMode="decimal"
+                    className="w-full rounded border border-slate-300 px-2 py-1.5 text-right text-sm font-mono-num" />
+                </label>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button onClick={() => baixarPlanilha("prestacao-contas")} disabled={gerando}
+                    className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">
+                    <DownloadIcon size={16} /> Baixar prestação de contas
+                  </button>
+                  <button onClick={() => setView("relatorio")}
+                    className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                    <ImageIcon size={16} /> Gerar relatório em PDF
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="mt-4 rounded-lg border-2 border-amber-400 bg-white p-4">
+              <p className="font-display text-sm font-bold uppercase tracking-wide text-amber-600">Sem adiantamento</p>
+              <h3 className="font-display text-lg font-bold">Solicitação de reembolso</h3>
+              <p className="mt-1 text-sm text-slate-600">Usa os {sorted.length} lançamento(s) da tabela de despesas (total {formatValor(totalGeral)}).</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button onClick={() => baixarPlanilha("reembolso")} disabled={gerando}
+                  className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">
+                  <DownloadIcon size={16} /> Baixar solicitação de reembolso
+                </button>
+                <button onClick={() => setView("relatorio")}
+                  className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                  <ImageIcon size={16} /> Gerar relatório em PDF
+                </button>
+              </div>
+            </div>
+          )}
+
+          {sorted.length > 22 && (
+            <p className="mt-3 text-xs text-amber-700">
+              Atenção: o formulário comporta 22 lançamentos por planilha e você tem {sorted.length}. Divida em mais de uma solicitação.
+            </p>
+          )}
+        </main>
+      )}
+
+      {/* ===================== CADASTROS ===================== */}
+      {view === "perfil" && (
+        <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
+          <div className="rounded-lg border border-slate-200 bg-white p-4">
+            <h2 className="font-display text-lg font-bold">Dados do solicitante</h2>
+            <p className="mt-1 text-xs text-slate-500">Preenchidos automaticamente em todos os formulários. Salve uma vez.</p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <Field label="Empresa / Unidade" value={profile.empresaUnidade} onChange={(v) => setProfile({ ...profile, empresaUnidade: v })} className="sm:col-span-2" />
+              <Field label="Departamento" value={profile.departamento} onChange={(v) => setProfile({ ...profile, departamento: v })} className="sm:col-span-2" />
+              <Field label="Nome" value={profile.nome} onChange={(v) => setProfile({ ...profile, nome: v })} />
+              <Field label="Cargo" value={profile.cargo} onChange={(v) => setProfile({ ...profile, cargo: v })} />
+              <Field label="CPF / CNPJ" value={profile.cpf} onChange={(v) => setProfile({ ...profile, cpf: v })} />
+              <Field label="Telefone" value={profile.telefone} onChange={(v) => setProfile({ ...profile, telefone: v })} />
+              <Field label="Banco" value={profile.banco} onChange={(v) => setProfile({ ...profile, banco: v })} />
+              <Field label="Agência" value={profile.agencia} onChange={(v) => setProfile({ ...profile, agencia: v })} />
+              <Field label="Conta" value={profile.conta} onChange={(v) => setProfile({ ...profile, conta: v })} />
+              <Field label="PIX" value={profile.pix} onChange={(v) => setProfile({ ...profile, pix: v })} />
+            </div>
+            <button onClick={saveProfile} className="mt-4 inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
+              <CheckIcon size={16} /> Salvar dados do solicitante
+            </button>
+          </div>
+
+          <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="font-display text-lg font-bold">Presets de rateio</h2>
+                <p className="mt-1 text-xs text-slate-500">Usinas, centros de custo e projetos usados com frequência.</p>
+              </div>
+              <button onClick={() => setPresets([...presets, { centroCusto: "", nCentroCusto: "", projeto: "", nProjeto: "", fase: "17", percentual: "" }])}
+                className="text-xs font-medium text-amber-700 hover:text-amber-900">+ linha</button>
+            </div>
+            <div className="mt-3">
+              {presets.map((r, i) => (
+                <div key={i} className="mb-1.5 grid grid-cols-2 gap-1.5 sm:grid-cols-7">
+                  <input value={r.centroCusto} onChange={(e) => setPresets(presets.map((x, j) => j === i ? { ...x, centroCusto: e.target.value } : x))} placeholder="Centro de custo" className="col-span-2 rounded border border-slate-300 px-2 py-1 text-xs" />
+                  <input value={r.nCentroCusto} onChange={(e) => setPresets(presets.map((x, j) => j === i ? { ...x, nCentroCusto: e.target.value } : x))} placeholder="Nº CC" className="rounded border border-slate-300 px-2 py-1 text-xs" />
+                  <input value={r.projeto} onChange={(e) => setPresets(presets.map((x, j) => j === i ? { ...x, projeto: e.target.value } : x))} placeholder="Projeto" className="rounded border border-slate-300 px-2 py-1 text-xs" />
+                  <input value={r.nProjeto} onChange={(e) => setPresets(presets.map((x, j) => j === i ? { ...x, nProjeto: e.target.value } : x))} placeholder="Nº projeto" className="rounded border border-slate-300 px-2 py-1 text-xs" />
+                  <input value={r.fase} onChange={(e) => setPresets(presets.map((x, j) => j === i ? { ...x, fase: e.target.value } : x))} placeholder="Fase" className="rounded border border-slate-300 px-2 py-1 text-xs" />
+                  <div className="flex gap-1">
+                    <input value={r.percentual} onChange={(e) => setPresets(presets.map((x, j) => j === i ? { ...x, percentual: e.target.value } : x))} placeholder="%" className="w-full rounded border border-slate-300 px-2 py-1 text-xs" />
+                    <button onClick={() => setPresets(presets.filter((_, j) => j !== i))} className="rounded p-1 text-red-600 hover:bg-red-100"><TrashIcon size={13} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 flex gap-2">
+              <button onClick={savePresets} className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
+                <CheckIcon size={16} /> Salvar presets
+              </button>
+              <button onClick={() => { setRateio(presets); setView("gerar"); }} className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Usar no formulário
+              </button>
+            </div>
+          </div>
+        </main>
+      )}
+
+      {/* ===================== RELATÓRIO FOTOGRÁFICO ===================== */}
+      {view === "relatorio" && (
         <main className="mx-auto max-w-3xl px-4 py-6 sm:px-6">
           <div className="no-print mb-4 flex items-center justify-between">
-            <button onClick={() => setShowReport(false)} className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
-              <ArrowLeftIcon size={15} /> Voltar à tabela
+            <button onClick={() => setView("tabela")} className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              <ArrowLeftIcon size={15} /> Voltar
             </button>
             {reportRecords.length > 0 && (
               <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800">
@@ -473,7 +699,7 @@ function App() {
           {reportRecords.length === 0 ? (
             <div className="rounded-lg border border-slate-200 bg-white p-10 text-center text-sm text-slate-400">
               <FileTextIcon className="mx-auto mb-2 text-slate-300" size={28} />
-              Nenhuma imagem disponível nesta sessão. Envie os comprovantes na tela anterior para gerar o relatório fotográfico (um arquivo por página).
+              Nenhum comprovante arquivado ainda. Envie os arquivos na aba Despesas.
             </div>
           ) : (
             <div className="space-y-6">
@@ -483,7 +709,15 @@ function App() {
                     <span>Página {idx + 1} de {reportRecords.length}</span>
                     <span className="font-mono-num">{r.data} · {r.tipo} · {formatValor(r.valor)}</span>
                   </div>
-                  <img src={r.imageDataUrl} alt={r.fileName || "comprovante"} className="mx-auto max-h-[70vh] w-auto rounded" />
+                  {r.mediaType === "application/pdf" ? (
+                    <div className="rounded border border-slate-200 bg-stone-50 p-6 text-center text-sm text-slate-500">
+                      <FileTextIcon className="mx-auto mb-2 text-slate-400" size={24} />
+                      Comprovante em PDF — <a href={fileUrl(r.id)} target="_blank" rel="noreferrer" className="text-amber-700 underline">abrir arquivo</a>
+                      <div className="mt-1 text-xs text-slate-400">{r.fileName}</div>
+                    </div>
+                  ) : (
+                    <img src={fileUrl(r.id)} alt={r.fileName || "comprovante"} className="mx-auto max-h-[70vh] w-auto rounded" />
+                  )}
                   {r.obs && <p className="mt-3 text-sm text-slate-600">{r.obs}</p>}
                 </div>
               ))}
@@ -492,10 +726,16 @@ function App() {
         </main>
       )}
 
-      {previewImage && (
-        <div className="no-print fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setPreviewImage(null)}>
-          <img src={previewImage} alt="Comprovante" className="max-h-[90vh] max-w-full rounded shadow-lg" />
-          <button onClick={() => setPreviewImage(null)} className="absolute right-4 top-4 rounded-full bg-white/90 p-2 text-slate-700 hover:bg-white"><XIcon size={18} /></button>
+      {previewId && (
+        <div className="no-print fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setPreviewId(null)}>
+          <img src={fileUrl(previewId)} alt="Comprovante" className="max-h-[90vh] max-w-full rounded shadow-lg" />
+          <button onClick={() => setPreviewId(null)} className="absolute right-4 top-4 rounded-full bg-white/90 p-2 text-slate-700 hover:bg-white"><XIcon size={18} /></button>
+        </div>
+      )}
+
+      {toast && (
+        <div className={`no-print fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-md px-4 py-2 text-sm text-white shadow-lg ${toast.isError ? "bg-red-600" : "bg-slate-900"}`}>
+          {toast.msg}
         </div>
       )}
     </div>
