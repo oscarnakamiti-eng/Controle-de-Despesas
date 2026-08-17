@@ -85,3 +85,15 @@ netlify dev
   use **Site settings → Visitor access** (senha) ou Netlify Identity.
 - Almoço e jantar acima de R$ 35,00 aparecem sinalizados na tabela.
 - O modelo usado na leitura é `claude-sonnet-5` (ajustável em `extract.mjs`).
+
+## Diagnóstico da chave da API
+
+Se a leitura de comprovantes retornar erro 401 (`invalid x-api-key`), abra no navegador:
+
+```
+https://SEU-SITE.netlify.app/.netlify/functions/diag
+```
+
+A função devolve um JSON dizendo se a variável chegou à função, se tem espaços/aspas,
+se o prefixo está certo, e faz um teste real contra a API — sem nunca exibir a chave.
+O campo `diagnostico` indica o que corrigir.
