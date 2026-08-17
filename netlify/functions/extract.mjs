@@ -1,6 +1,9 @@
-// Netlify Function (v2) — recebe {base64, mediaType, isPdf} e chama a API da Anthropic
-// server-side, usando a chave secreta guardada em ANTHROPIC_API_KEY (variável de ambiente
-// do site na Netlify). A chave NUNCA fica exposta no navegador.
+// Netlify Function (v2) — chama a API da Anthropic server-side (chave secreta em
+// ANTHROPIC_API_KEY) para extrair os dados do comprovante e, em caso de sucesso,
+// guarda o arquivo original (imagem/PDF) no Netlify Blobs para uso posterior
+// (preview, relatório fotográfico, reimpressão), mesmo depois de recarregar a página.
+
+import { getStore } from "@netlify/blobs";
 
 const EXTRACTION_PROMPT = `Analise o comprovante, recibo, nota fiscal ou cupom fiscal anexado e extraia as informações do gasto.
 
@@ -17,35 +20,21 @@ Regras:
 - Não escreva nada além do JSON.`;
 
 function json(body, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
 export default async (req) => {
-  if (req.method !== "POST") {
-    return json({ error: "Método não permitido" }, 405);
-  }
+  if (req.method !== "POST") return json({ error: "Método não permitido" }, 405);
 
   let payload;
-  try {
-    payload = await req.json();
-  } catch {
-    return json({ error: "Corpo da requisição inválido" }, 400);
-  }
+  try { payload = await req.json(); } catch { return json({ error: "Corpo da requisição inválido" }, 400); }
 
-  const { base64, mediaType, isPdf } = payload || {};
-  if (!base64) {
-    return json({ error: "Arquivo (base64) ausente" }, 400);
-  }
+  const { id, base64, mediaType, isPdf, fileName } = payload || {};
+  if (!base64) return json({ error: "Arquivo (base64) ausente" }, 400);
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return json(
-      { error: "ANTHROPIC_API_KEY não configurada nas variáveis de ambiente do site na Netlify." },
-      500
-    );
+    return json({ error: "ANTHROPIC_API_KEY não configurada nas variáveis de ambiente do site na Netlify." }, 500);
   }
 
   const contentBlock = isPdf
@@ -56,17 +45,11 @@ export default async (req) => {
   try {
     anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({
         model: "claude-sonnet-5",
         max_tokens: 1000,
-        messages: [
-          { role: "user", content: [contentBlock, { type: "text", text: EXTRACTION_PROMPT }] },
-        ],
+        messages: [{ role: "user", content: [contentBlock, { type: "text", text: EXTRACTION_PROMPT }] }],
       }),
     });
   } catch (err) {
@@ -80,19 +63,24 @@ export default async (req) => {
 
   const data = await anthropicRes.json();
   const textBlock = (data.content || []).find((b) => b.type === "text");
-  if (!textBlock) {
-    return json({ error: "Resposta vazia do modelo" }, 502);
-  }
+  if (!textBlock) return json({ error: "Resposta vazia do modelo" }, 502);
 
-  let clean = textBlock.text.trim();
-  clean = clean.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
-
+  let clean = textBlock.text.trim().replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
   let parsed;
-  try {
-    parsed = JSON.parse(clean);
-  } catch {
-    return json({ error: "Não foi possível interpretar a resposta do modelo como JSON" }, 502);
+  try { parsed = JSON.parse(clean); } catch { return json({ error: "Não foi possível interpretar a resposta do modelo como JSON" }, 502); }
+
+  // Guarda o arquivo original nos Blobs para uso posterior (preview / relatório fotográfico)
+  if (id) {
+    try {
+      const store = getStore("expense-tracker");
+      const bytes = Buffer.from(base64, "base64");
+      await store.set(`file:${id}`, bytes);
+      await store.setJSON(`file-meta:${id}`, { mediaType: isPdf ? "application/pdf" : (mediaType || "image/jpeg"), fileName: fileName || null });
+    } catch (err) {
+      // não falha a extração por causa disso — só avisa
+      return json({ parsed, fileStored: false, fileError: String(err.message || err) });
+    }
   }
 
-  return json({ parsed });
+  return json({ parsed, fileStored: !!id });
 };
