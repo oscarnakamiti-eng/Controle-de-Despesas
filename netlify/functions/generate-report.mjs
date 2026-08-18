@@ -11,7 +11,8 @@ import ExcelJS from "exceljs";
 import path from "path";
 import { fileURLToPath } from "url";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// não declarar __dirname: o runtime da Netlify já o define e a redeclaração quebra a função
+const TEMPLATES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "templates");
 
 const FORMS = {
   "solicitacao-adiantamento": {
@@ -100,7 +101,7 @@ export default async (req) => {
     }
 
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.readFile(path.join(__dirname, "templates", tier.file));
+    await wb.xlsx.readFile(path.join(TEMPLATES_DIR, tier.file));
     const ws = wb.getWorksheet(form.sheet) || wb.worksheets[0];
 
     // Dados da empresa e do solicitante

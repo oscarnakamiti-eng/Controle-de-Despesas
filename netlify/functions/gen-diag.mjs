@@ -7,7 +7,8 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// não declarar __dirname: o runtime da Netlify já o define e a redeclaração quebra a função
+const BASE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body, null, 2), { status, headers: { "Content-Type": "application/json" } });
@@ -19,10 +20,10 @@ export default async () => {
 
   // 1) Node e diretório
   d.nodeVersion = process.version;
-  d.dirname = __dirname;
+  d.dirname = BASE_DIR;
 
   // 2) Pasta de modelos
-  const dir = path.join(__dirname, "templates");
+  const dir = path.join(BASE_DIR, "templates");
   try {
     const arquivos = fs.readdirSync(dir);
     passo("Pasta templates encontrada", true, `${arquivos.length} arquivo(s)`);
