@@ -13,6 +13,23 @@ import { fileURLToPath } from "url";
 
 // não declarar __dirname: o runtime da Netlify já o define e a redeclaração quebra a função
 const TEMPLATES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "templates");
+const LOGO_PATH = path.join(TEMPLATES_DIR, "logo.jpg");
+
+// A logomarca não fica embutida nos modelos: o ExcelJS não consegue ler o desenho
+// gravado pelo openpyxl (erro "reading 'anchors'"). Ela é reinserida aqui, na mesma
+// posição e tamanho do formulário original.
+function inserirLogo(wb, ws) {
+  try {
+    const imageId = wb.addImage({ filename: LOGO_PATH, extension: "jpeg" });
+    ws.addImage(imageId, {
+      tl: { col: 0.09, row: 1.09 },   // canto superior esquerdo (coluna A, linha 2)
+      ext: { width: 199, height: 41 },
+      editAs: "oneCell",
+    });
+  } catch {
+    // sem a logo o formulário continua válido; não vale derrubar a geração por isso
+  }
+}
 
 const FORMS = {
   "solicitacao-adiantamento": {
@@ -103,6 +120,7 @@ export default async (req) => {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(path.join(TEMPLATES_DIR, tier.file));
     const ws = wb.getWorksheet(form.sheet) || wb.worksheets[0];
+    inserirLogo(wb, ws);
 
     // Dados da empresa e do solicitante
     ws.getCell("C6").value = profile.empresaUnidade || "";

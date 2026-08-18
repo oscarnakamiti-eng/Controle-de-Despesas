@@ -57,7 +57,16 @@ export default async () => {
     const ws = wb.getWorksheet("FORM 189") || wb.worksheets[0];
     passo("Modelo lido", true, `aba "${ws && ws.name}", ${ws ? ws.rowCount : 0} linhas`);
 
-    // 5) Escrita
+    // 5) Logomarca
+    try {
+      const imageId = wb.addImage({ filename: path.join(dir, "logo.jpg"), extension: "jpeg" });
+      ws.addImage(imageId, { tl: { col: 0.09, row: 1.09 }, ext: { width: 199, height: 41 }, editAs: "oneCell" });
+      passo("Logomarca inserida", true, "logo.jpg");
+    } catch (e) {
+      passo("Logomarca inserida", false, String(e.message || e));
+    }
+
+    // 6) Escrita
     ws.getCell("C8").value = "TESTE";
     const buf = await wb.xlsx.writeBuffer();
     passo("Planilha gerada", true, `${buf.byteLength} bytes`);
