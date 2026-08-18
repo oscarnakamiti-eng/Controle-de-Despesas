@@ -97,3 +97,15 @@ https://SEU-SITE.netlify.app/.netlify/functions/diag
 A função devolve um JSON dizendo se a variável chegou à função, se tem espaços/aspas,
 se o prefixo está certo, e faz um teste real contra a API — sem nunca exibir a chave.
 O campo `diagnostico` indica o que corrigir.
+
+## Comprovantes em PDF
+
+PDFs são convertidos em imagem no próprio navegador (pdf.js) no momento do envio,
+página por página, e as imagens ficam guardadas nos Blobs (`preview:<id>:<n>`).
+Isso faz com que:
+
+- a pré-visualização mostre o conteúdo do PDF, não um ícone quebrado;
+- o relatório fotográfico gere **uma página por página do PDF** e imprima corretamente.
+
+Um PDF de 3 páginas vira 3 páginas do relatório. Se a conversão falhar por algum
+motivo, o relatório mantém um link para abrir o arquivo original.
