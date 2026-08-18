@@ -4,4 +4,8 @@
 
 [functions]
   node_bundler = "esbuild"
+  # os modelos .xlsx precisam ir junto com o código da função
   included_files = ["netlify/functions/templates/**"]
+  # exceljs e xlsx usam require dinâmico e quebram se forem empacotados pelo esbuild;
+  # marcá-los como externos faz a Netlify instalá-los normalmente em node_modules
+  external_node_modules = ["exceljs", "xlsx"]
