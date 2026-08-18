@@ -1,41 +1,23 @@
-// Netlify Function (v2) — preenche os formulários oficiais (FORM 189) preservando
-// integralmente o layout original: fórmulas, bordas, formatos e a logomarca.
+// Netlify Function (v2) — preenche os formulários oficiais (FORM 189).
 //
-// Cada formulário tem modelos em vários tamanhos; o menor que couber é escolhido
-// automaticamente conforme a quantidade de lançamentos.
+// Os modelos .xlsx trazem marcadores (@@CELULA@@) nas células preenchíveis.
+// Aqui apenas descompactamos o arquivo, substituímos os marcadores no XML da
+// planilha e recompactamos. Nenhuma biblioteca de Excel é usada — o arquivo sai
+// idêntico ao original em formatação, fórmulas, mesclagens e logomarca.
 //
 // POST { tipo, profile, motivo, valorAdiantamento, rateio: [...], records: [...], previsoes: [...] }
-//   tipo: "solicitacao-adiantamento" | "prestacao-contas" | "reembolso"
 
-import ExcelJS from "exceljs";
+import { unzipSync, zipSync } from "fflate";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 
-// não declarar __dirname: o runtime da Netlify já o define e a redeclaração quebra a função
 const TEMPLATES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "templates");
-const LOGO_PATH = path.join(TEMPLATES_DIR, "logo.jpg");
-
-// A logomarca não fica embutida nos modelos: o ExcelJS não consegue ler o desenho
-// gravado pelo openpyxl (erro "reading 'anchors'"). Ela é reinserida aqui, na mesma
-// posição e tamanho do formulário original.
-function inserirLogo(wb, ws) {
-  try {
-    const imageId = wb.addImage({ filename: LOGO_PATH, extension: "jpeg" });
-    ws.addImage(imageId, {
-      tl: { col: 0.09, row: 1.09 },   // canto superior esquerdo (coluna A, linha 2)
-      ext: { width: 199, height: 41 },
-      editAs: "oneCell",
-    });
-  } catch {
-    // sem a logo o formulário continua válido; não vale derrubar a geração por isso
-  }
-}
 
 const FORMS = {
   "solicitacao-adiantamento": {
-    sheet: "ADIANTAMENTO",
     fileName: "solicitacao-adiantamento.xlsx",
-    motivoCell: "B16",
+    motivo: "B16",
     rateio: { first: 21, max: 10, cols: { centroCusto: "A", nCentroCusto: "B", projeto: "E", nProjeto: "G", fase: "H", percentual: "J" } },
     itemCols: { obs: "B", valor: "K" },   // despesas PREVISTAS: histórico + valor
     tiers: [
@@ -46,9 +28,8 @@ const FORMS = {
     ],
   },
   "prestacao-contas": {
-    sheet: "PRESTAÇÃO CONTAS ADIANTAMENTO",
     fileName: "prestacao-contas-adiantamento.xlsx",
-    motivoCell: "B16",
+    motivo: "B16",
     rateio: { first: 21, max: 6, cols: { centroCusto: "A", nCentroCusto: "B", projeto: "D", nProjeto: "G", fase: "H", percentual: "J" } },
     itemCols: { data: "B", tipo: "C", obs: "F", valor: "K" },
     tiers: [
@@ -60,9 +41,8 @@ const FORMS = {
     ],
   },
   "reembolso": {
-    sheet: "FORM 189",
     fileName: "solicitacao-reembolso.xlsx",
-    motivoCell: "B15",
+    motivo: "B15",
     rateio: { first: 20, max: 6, cols: { centroCusto: "A", nCentroCusto: "B", projeto: "D", nProjeto: "G", fase: "H", percentual: "J" } },
     itemCols: { data: "B", tipo: "C", obs: "F", valor: "K" },
     tiers: [
@@ -80,13 +60,18 @@ function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
-function parseDatePtBr(str) {
-  if (!str) return null;
-  const m = String(str).trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+function escaparXml(v) {
+  return String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Data no formato DD/MM/AAAA -> número de série do Excel
+function serialDeData(str) {
+  const m = String(str || "").trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (!m) return null;
   const [, d, mo, y] = m;
-  const dt = new Date(Number(y), Number(mo) - 1, Number(d));
-  return isNaN(dt.getTime()) ? null : dt;
+  const dt = Date.UTC(Number(y), Number(mo) - 1, Number(d));
+  if (isNaN(dt)) return null;
+  return Math.round((dt - Date.UTC(1899, 11, 30)) / 86400000);
 }
 
 export default async (req) => {
@@ -100,7 +85,6 @@ export default async (req) => {
     if (!form) return json({ error: `Tipo de formulário inválido: ${body.tipo}` }, 400);
 
     const profile = body.profile || {};
-    const motivo = body.motivo || "";
     const rateio = Array.isArray(body.rateio) ? body.rateio : [];
     const itens = body.tipo === "solicitacao-adiantamento"
       ? (Array.isArray(body.previsoes) ? body.previsoes : [])
@@ -110,65 +94,80 @@ export default async (req) => {
       return json({ error: `Este formulário comporta até ${form.rateio.max} linhas de rateio (foram enviadas ${rateio.length}).` }, 400);
     }
 
-    // escolhe o menor modelo que comporte todos os lançamentos
     const tier = form.tiers.find((t) => itens.length <= t.n);
     if (!tier) {
       const maior = form.tiers[form.tiers.length - 1].n;
       return json({ error: `São ${itens.length} lançamentos e o maior modelo comporta ${maior}. Divida em mais de uma solicitação.` }, 400);
     }
 
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.readFile(path.join(TEMPLATES_DIR, tier.file));
-    const ws = wb.getWorksheet(form.sheet) || wb.worksheets[0];
-    inserirLogo(wb, ws);
+    // ---- monta os valores por célula ----
+    const texto = {};   // conteúdo textual
+    const numero = {};  // conteúdo numérico (valores, datas, percentuais)
 
-    // Dados da empresa e do solicitante
-    ws.getCell("C6").value = profile.empresaUnidade || "";
-    ws.getCell("C7").value = profile.departamento || "";
-    ws.getCell("C8").value = profile.nome || "";
-    ws.getCell("I8").value = profile.cpf || "";
-    ws.getCell("K8").value = profile.telefone || "";
-    ws.getCell("C9").value = profile.cargo || "";
-    ws.getCell("I9").value = profile.agencia || "";
-    ws.getCell("K9").value = profile.conta || "";
-    ws.getCell("C10").value = profile.pix || "";
-    ws.getCell("K10").value = profile.banco || "";
-    ws.getCell(form.motivoCell).value = motivo;
+    texto["C6"] = profile.empresaUnidade || "";
+    texto["C7"] = profile.departamento || "";
+    texto["C8"] = profile.nome || "";
+    texto["I8"] = profile.cpf || "";
+    texto["K8"] = profile.telefone || "";
+    texto["C9"] = profile.cargo || "";
+    texto["I9"] = profile.agencia || "";
+    texto["K9"] = profile.conta || "";
+    texto["C10"] = profile.pix || "";
+    texto["K10"] = profile.banco || "";
+    texto[form.motivo] = body.motivo || "";
 
-    // Rateio
     const rc = form.rateio.cols;
     rateio.slice(0, form.rateio.max).forEach((r, i) => {
       const row = form.rateio.first + i;
-      ws.getCell(`${rc.centroCusto}${row}`).value = r.centroCusto || "";
-      ws.getCell(`${rc.nCentroCusto}${row}`).value = r.nCentroCusto || "";
-      ws.getCell(`${rc.projeto}${row}`).value = r.projeto || "";
-      ws.getCell(`${rc.nProjeto}${row}`).value = r.nProjeto || "";
-      if (r.fase !== undefined && r.fase !== null && r.fase !== "") ws.getCell(`${rc.fase}${row}`).value = r.fase;
+      texto[`${rc.centroCusto}${row}`] = r.centroCusto || "";
+      texto[`${rc.nCentroCusto}${row}`] = r.nCentroCusto || "";
+      texto[`${rc.projeto}${row}`] = r.projeto || "";
+      texto[`${rc.nProjeto}${row}`] = r.nProjeto || "";
+      texto[`${rc.fase}${row}`] = (r.fase === undefined || r.fase === null) ? "" : r.fase;
       const pct = Number(r.percentual);
-      ws.getCell(`${rc.percentual}${row}`).value = isNaN(pct) ? "" : pct / 100;
+      if (!isNaN(pct) && r.percentual !== "" && r.percentual !== null) numero[`${rc.percentual}${row}`] = pct / 100;
     });
 
-    // Detalhamento das despesas
     const ic = form.itemCols;
     itens.forEach((rec, i) => {
       const row = tier.first + i;
       if (ic.data) {
-        const d = parseDatePtBr(rec.data);
-        ws.getCell(`${ic.data}${row}`).value = d || rec.data || "";
+        const serial = serialDeData(rec.data);
+        if (serial !== null) numero[`${ic.data}${row}`] = serial;
       }
-      if (ic.tipo) ws.getCell(`${ic.tipo}${row}`).value = rec.tipo || "";
-      ws.getCell(`${ic.obs}${row}`).value = rec.obs || "";
-      ws.getCell(`${ic.valor}${row}`).value = Number(rec.valor) || 0;
+      if (ic.tipo) texto[`${ic.tipo}${row}`] = rec.tipo || "";
+      texto[`${ic.obs}${row}`] = rec.obs || "";
+      numero[`${ic.valor}${row}`] = Number(rec.valor) || 0;
     });
 
-    // Campos específicos
-    // (o TOTAL GERAL do adiantamento é calculado pela própria fórmula do formulário)
     if (tier.adiant) {
-      ws.getCell(`K${tier.adiant}`).value = Number(body.valorAdiantamento) || 0;
+      numero[`K${tier.adiant}`] = Number(body.valorAdiantamento) || 0;
     }
 
-    const buffer = await wb.xlsx.writeBuffer();
-    return new Response(buffer, {
+    // ---- substitui os marcadores no XML da planilha ----
+    const zipBytes = fs.readFileSync(path.join(TEMPLATES_DIR, tier.file));
+    const arquivos = unzipSync(new Uint8Array(zipBytes));
+
+    const nomeSheet = Object.keys(arquivos).find(
+      (n) => n.startsWith("xl/worksheets/sheet") && n.endsWith(".xml")
+    );
+    if (!nomeSheet) return json({ error: "Modelo inválido: planilha não encontrada." }, 500);
+
+    let xml = new TextDecoder("utf-8").decode(arquivos[nomeSheet]);
+
+    // números: <v>@@REF@@</v> -> <v>123.45</v>; sem valor, a célula fica vazia
+    xml = xml.replace(/<v>@@([A-Z]+\d+)@@<\/v>/g, (_, ref) =>
+      Object.prototype.hasOwnProperty.call(numero, ref) ? `<v>${numero[ref]}</v>` : ""
+    );
+    // textos: @@REF@@ -> conteúdo escapado (ou vazio)
+    xml = xml.replace(/@@([A-Z]+\d+)@@/g, (_, ref) =>
+      Object.prototype.hasOwnProperty.call(texto, ref) ? escaparXml(texto[ref]) : ""
+    );
+
+    arquivos[nomeSheet] = new TextEncoder().encode(xml);
+    const saida = zipSync(arquivos, { level: 6 });
+
+    return new Response(saida, {
       status: 200,
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -176,7 +175,6 @@ export default async (req) => {
       },
     });
   } catch (err) {
-    // devolve o motivo real em vez de deixar a função quebrar com 502
-    return json({ error: `Erro ao gerar a planilha: ${String(err && err.message || err)}` }, 500);
+    return json({ error: `Erro ao gerar a planilha: ${String((err && err.message) || err)}` }, 500);
   }
 };
