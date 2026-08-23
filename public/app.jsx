@@ -275,6 +275,47 @@ function EditRow({ draft, setDraft, onSave, onCancel }) {
   );
 }
 
+// Um cartão do relatório fotográfico. Detecta quando a pré-visualização não
+// carrega (arquivo removido/nunca convertido) e mostra um aviso em vez do
+// ícone de imagem quebrada do navegador, escondendo também o botão de baixar
+// nesse caso (evita o erro 404 ao clicar).
+function ReportPageCard({ r, idx, total, onBaixar, fileUrl }) {
+  const [imgFalhou, setImgFalhou] = useState(false);
+  const disponivel = !!r.src && !imgFalhou;
+  return (
+    <div className="report-page rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      {r.obs && <p className="mb-3 border-b border-slate-100 pb-2 text-sm text-slate-600">{r.obs}</p>}
+      {disponivel ? (
+        <img src={r.src} alt={r.fileName || "comprovante"} className="mx-auto max-h-[70vh] w-auto rounded" onError={() => setImgFalhou(true)} />
+      ) : (
+        <div className="rounded border border-slate-200 bg-stone-50 p-6 text-center text-sm text-slate-500">
+          <FileTextIcon className="mx-auto mb-2 text-slate-400" size={24} />
+          {imgFalhou ? (
+            <>Comprovante indisponível (o arquivo pode ter sido removido) — <a href={fileUrl(r.id)} target="_blank" rel="noreferrer" className="text-amber-700 underline">tentar abrir o arquivo original</a></>
+          ) : (
+            <>Não foi possível converter este PDF — <a href={fileUrl(r.id)} target="_blank" rel="noreferrer" className="text-amber-700 underline">abrir arquivo</a></>
+          )}
+          <div className="mt-1 text-xs text-slate-400">{r.fileName}</div>
+        </div>
+      )}
+      <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2 text-xs text-slate-500">
+        <span>
+          Página {idx + 1} de {total}
+          {r.totalPages > 1 && <span className="ml-1 text-slate-400">(arquivo {r.page}/{r.totalPages})</span>}
+        </span>
+        <span className="flex items-center gap-2">
+          <span className="font-mono-num">{r.data} · {r.tipo} · {formatValor(r.valor)}</span>
+          {disponivel && (
+            <button onClick={() => onBaixar(r, idx)} title="Baixar este comprovante" className="no-print rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+              <DownloadIcon size={14} />
+            </button>
+          )}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // Achata a estrutura agrupada (centro de custo -> projetos) numa lista plana
 // de linhas, uma por projeto, repetindo os dados do centro de custo — é o
 // formato que a planilha oficial espera (uma linha por combinação).
@@ -691,19 +732,28 @@ function App() {
     }
   };
 
+  // Monta um .zip com todos os comprovantes disponíveis (pula os que não têm
+  // pré-visualização). Devolve null se não houver nenhum arquivo pra incluir.
+  const construirZipComprovantes = async () => {
+    const arquivos = {};
+    for (let i = 0; i < reportPages.length; i++) {
+      const r = reportPages[i];
+      if (!r.src) continue;
+      const res = await fetch(r.src);
+      if (!res.ok) continue;
+      arquivos[nomeArquivoComprovante(r, i)] = new Uint8Array(await res.arrayBuffer());
+    }
+    if (Object.keys(arquivos).length === 0) return null;
+    const zipBytes = window.fflate.zipSync(arquivos, { level: 6 });
+    return new Blob([zipBytes], { type: "application/zip" });
+  };
+
   const baixarTodosComprovantes = async () => {
     if (reportPages.length === 0) return;
     try {
-      const arquivos = {};
-      for (let i = 0; i < reportPages.length; i++) {
-        const r = reportPages[i];
-        if (!r.src) continue;
-        const res = await fetch(r.src);
-        if (!res.ok) continue;
-        arquivos[nomeArquivoComprovante(r, i)] = new Uint8Array(await res.arrayBuffer());
-      }
-      const zipBytes = window.fflate.zipSync(arquivos, { level: 6 });
-      await salvarArquivoComo(new Blob([zipBytes], { type: "application/zip" }), "comprovantes.zip");
+      const blob = await construirZipComprovantes();
+      if (!blob) { showToast("Nenhum comprovante disponível para baixar.", true); return; }
+      await salvarArquivoComo(blob, "comprovantes.zip");
     } catch (e) {
       showToast(`Erro ao baixar comprovantes: ${e.message}`, true);
     }
@@ -756,6 +806,11 @@ function App() {
           });
           if (resPdf.ok) { await salvarArquivoComo(await resPdf.blob(), `relatorio-fotografico-${tipo}.pdf`); temPdf = true; }
         } catch { /* o Excel já foi gerado; o relatório em PDF fica só pendente */ }
+
+        try {
+          const zipBlob = await construirZipComprovantes();
+          if (zipBlob) await salvarArquivoComo(zipBlob, `comprovantes-${tipo}.zip`);
+        } catch { /* Excel e PDF já gerados; o zip de fotos fica só pendente */ }
       }
 
       if (isAdiantamentoReq) setPrevisoes([]); else setRecords([]);
@@ -1103,10 +1158,6 @@ function App() {
                     className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">
                     <DownloadIcon size={16} /> Baixar prestação de contas
                   </button>
-                  <button onClick={() => setView("relatorio")}
-                    className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
-                    <ImageIcon size={16} /> Gerar relatório em PDF
-                  </button>
                 </div>
               </div>
             </>
@@ -1119,10 +1170,6 @@ function App() {
                 <button onClick={() => baixarPlanilha("reembolso")} disabled={gerando}
                   className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">
                   <DownloadIcon size={16} /> Baixar solicitação de reembolso
-                </button>
-                <button onClick={() => setView("relatorio")}
-                  className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
-                  <ImageIcon size={16} /> Gerar relatório em PDF
                 </button>
               </div>
             </div>
@@ -1236,32 +1283,7 @@ function App() {
           ) : (
             <div className="space-y-6">
               {reportPages.map((r, idx) => (
-                <div key={`${r.id}-${r.page}`} className="report-page rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                  {r.obs && <p className="mb-3 border-b border-slate-100 pb-2 text-sm text-slate-600">{r.obs}</p>}
-                  {r.src ? (
-                    <img src={r.src} alt={r.fileName || "comprovante"} className="mx-auto max-h-[70vh] w-auto rounded" />
-                  ) : (
-                    <div className="rounded border border-slate-200 bg-stone-50 p-6 text-center text-sm text-slate-500">
-                      <FileTextIcon className="mx-auto mb-2 text-slate-400" size={24} />
-                      Não foi possível converter este PDF — <a href={fileUrl(r.id)} target="_blank" rel="noreferrer" className="text-amber-700 underline">abrir arquivo</a>
-                      <div className="mt-1 text-xs text-slate-400">{r.fileName}</div>
-                    </div>
-                  )}
-                  <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2 text-xs text-slate-500">
-                    <span>
-                      Página {idx + 1} de {reportPages.length}
-                      {r.totalPages > 1 && <span className="ml-1 text-slate-400">(arquivo {r.page}/{r.totalPages})</span>}
-                    </span>
-                    <span className="flex items-center gap-2">
-                      <span className="font-mono-num">{r.data} · {r.tipo} · {formatValor(r.valor)}</span>
-                      {r.src && (
-                        <button onClick={() => baixarComprovante(r, idx)} title="Baixar este comprovante" className="no-print rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
-                          <DownloadIcon size={14} />
-                        </button>
-                      )}
-                    </span>
-                  </div>
-                </div>
+                <ReportPageCard key={`${r.id}-${r.page}`} r={r} idx={idx} total={reportPages.length} onBaixar={baixarComprovante} fileUrl={fileUrl} />
               ))}
             </div>
           )}
