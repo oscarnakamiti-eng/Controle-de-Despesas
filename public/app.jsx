@@ -1237,7 +1237,17 @@ function App() {
             <div className="space-y-6">
               {reportPages.map((r, idx) => (
                 <div key={`${r.id}-${r.page}`} className="report-page rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                  <div className="mb-3 flex items-center justify-between border-b border-slate-100 pb-2 text-xs text-slate-500">
+                  {r.obs && <p className="mb-3 border-b border-slate-100 pb-2 text-sm text-slate-600">{r.obs}</p>}
+                  {r.src ? (
+                    <img src={r.src} alt={r.fileName || "comprovante"} className="mx-auto max-h-[70vh] w-auto rounded" />
+                  ) : (
+                    <div className="rounded border border-slate-200 bg-stone-50 p-6 text-center text-sm text-slate-500">
+                      <FileTextIcon className="mx-auto mb-2 text-slate-400" size={24} />
+                      Não foi possível converter este PDF — <a href={fileUrl(r.id)} target="_blank" rel="noreferrer" className="text-amber-700 underline">abrir arquivo</a>
+                      <div className="mt-1 text-xs text-slate-400">{r.fileName}</div>
+                    </div>
+                  )}
+                  <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2 text-xs text-slate-500">
                     <span>
                       Página {idx + 1} de {reportPages.length}
                       {r.totalPages > 1 && <span className="ml-1 text-slate-400">(arquivo {r.page}/{r.totalPages})</span>}
@@ -1251,16 +1261,6 @@ function App() {
                       )}
                     </span>
                   </div>
-                  {r.src ? (
-                    <img src={r.src} alt={r.fileName || "comprovante"} className="mx-auto max-h-[70vh] w-auto rounded" />
-                  ) : (
-                    <div className="rounded border border-slate-200 bg-stone-50 p-6 text-center text-sm text-slate-500">
-                      <FileTextIcon className="mx-auto mb-2 text-slate-400" size={24} />
-                      Não foi possível converter este PDF — <a href={fileUrl(r.id)} target="_blank" rel="noreferrer" className="text-amber-700 underline">abrir arquivo</a>
-                      <div className="mt-1 text-xs text-slate-400">{r.fileName}</div>
-                    </div>
-                  )}
-                  {r.obs && <p className="mt-3 text-sm text-slate-600">{r.obs}</p>}
                 </div>
               ))}
             </div>

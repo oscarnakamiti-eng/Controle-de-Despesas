@@ -54,12 +54,15 @@ export default async (req) => {
 
       const valorFmt = (Number(p.valor) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       const legenda = textoSeguro(`${p.data || ""}   -   ${p.tipo || ""}   -   R$ ${valorFmt}`);
-      try {
-        page.drawText(legenda, { x: MARGEM, y: topo - 10, size: 11, font: fonteNegrito, color: rgb(0.1, 0.1, 0.15) });
-      } catch { /* caractere não suportado: segue sem a legenda */ }
 
-      const yImagemTopo = topo - 30;
-      const yImagemBase = MARGEM + (temObs ? 40 : 0);
+      if (temObs) {
+        try {
+          page.drawText(textoSeguro(p.obs), { x: MARGEM, y: topo - 10, size: 9, font: fonte, color: rgb(0.3, 0.3, 0.35) });
+        } catch { /* caractere não suportado: segue sem a observação */ }
+      }
+
+      const yImagemTopo = topo - (temObs ? 30 : 10);
+      const yImagemBase = MARGEM + 30;
       const centroY = (yImagemTopo + yImagemBase) / 2;
 
       const bytes = await buscarImagem(store, p);
@@ -81,11 +84,9 @@ export default async (req) => {
         } catch { /* ignora */ }
       }
 
-      if (temObs) {
-        try {
-          page.drawText(textoSeguro(p.obs), { x: MARGEM, y: MARGEM + 14, size: 9, font: fonte, color: rgb(0.3, 0.3, 0.35) });
-        } catch { /* ignora */ }
-      }
+      try {
+        page.drawText(legenda, { x: MARGEM, y: MARGEM + 14, size: 11, font: fonteNegrito, color: rgb(0.1, 0.1, 0.15) });
+      } catch { /* ignora */ }
     }
 
     const pdfBytes = await pdfDoc.save();
