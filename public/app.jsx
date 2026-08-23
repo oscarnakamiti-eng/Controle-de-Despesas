@@ -79,30 +79,54 @@ function fileToBase64(file) {
     reader.readAsDataURL(file);
   });
 }
+// Reduz fotos grandes (câmera de celular facilmente passa de 6 MB) antes do
+// envio, pra não estourar o limite de payload do servidor. Se o navegador não
+// conseguir decodificar o arquivo (ex.: formato não suportado), devolve null
+// e o chamador segue com o arquivo original.
+async function comprimirImagem(file, maxDim = 2000, quality = 0.85) {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const escala = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+    const w = Math.round(bitmap.width * escala);
+    const h = Math.round(bitmap.height * escala);
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, w, h);
+    bitmap.close?.();
+    return canvas.toDataURL("image/jpeg", quality).split(",")[1];
+  } catch {
+    return null;
+  }
+}
 function makeId() { return `rec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; }
 function fileUrl(id) { return `/.netlify/functions/files?id=${encodeURIComponent(id)}`; }
 function previewUrl(id, page) { return `${fileUrl(id)}&preview=${page}`; }
 
-// Converte cada página de um PDF em PNG (via pdf.js) e envia ao servidor,
+// Converte cada página de um PDF em JPEG (via pdf.js) e envia ao servidor,
 // para que a pré-visualização e o relatório fotográfico consigam exibi-las.
+// JPEG em vez de PNG e um teto de dimensão evitam páginas grandes (formulários
+// digitalizados em A3, por ex.) de estourar o limite de payload do servidor.
 async function converterPdfEmImagens(id, base64, onProgress) {
   if (!window.pdfjsLib) throw new Error("Biblioteca de PDF não carregou");
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const pdf = await window.pdfjsLib.getDocument({ data: bytes }).promise;
   const total = pdf.numPages;
+  const MAX_DIM = 2200;
 
   for (let n = 1; n <= total; n++) {
     if (onProgress) onProgress(n, total);
     const page = await pdf.getPage(n);
-    const viewport = page.getViewport({ scale: 2 });   // escala 2 = boa leitura na impressão
+    const base = page.getViewport({ scale: 1 });
+    const escala = Math.min(2, MAX_DIM / Math.max(base.width, base.height));  // escala 2 = boa leitura na impressão
+    const viewport = page.getViewport({ scale: escala });
     const canvas = document.createElement("canvas");
     canvas.width = viewport.width;
     canvas.height = viewport.height;
     await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
-    const png = canvas.toDataURL("image/png").split(",")[1];
+    const jpeg = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
     const res = await fetch("/.netlify/functions/upload-preview", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, page: n, base64: png }),
+      body: JSON.stringify({ id, page: n, base64: jpeg }),
     });
     await parseJsonResponse(res);
   }
@@ -286,9 +310,13 @@ function App() {
       const qid = items[i].qid;
       setQueue((prev) => prev.map((q) => (q.qid === qid ? { ...q, status: "lendo" } : q)));
       try {
-        const base64 = await fileToBase64(file);
         const isPdf = file.type === "application/pdf";
-        const mediaType = isPdf ? "application/pdf" : (file.type || "image/jpeg");
+        let base64 = await fileToBase64(file);
+        let mediaType = isPdf ? "application/pdf" : (file.type || "image/jpeg");
+        if (!isPdf) {
+          const comprimido = await comprimirImagem(file);
+          if (comprimido) { base64 = comprimido; mediaType = "image/jpeg"; }
+        }
         const recId = makeId();
         const { parsed, fileStored } = await callExtract(recId, base64, mediaType, isPdf, file.name);
 

@@ -1,6 +1,6 @@
 // Netlify Function (v2) — serve e apaga os arquivos dos comprovantes.
 // GET    ?id=<id>            -> arquivo original (imagem ou PDF)
-// GET    ?id=<id>&preview=N  -> página N do PDF convertida em PNG
+// GET    ?id=<id>&preview=N  -> página N do PDF convertida em JPEG
 // DELETE ?id=<id>&pages=N    -> remove o original, os metadados e as N páginas convertidas
 
 import { getStore } from "@netlify/blobs";
@@ -23,7 +23,7 @@ export default async (req) => {
       if (!buf) return new Response("Página não encontrada", { status: 404 });
       return new Response(buf, {
         status: 200,
-        headers: { "Content-Type": "image/png", "Cache-Control": "private, max-age=3600" },
+        headers: { "Content-Type": "image/jpeg", "Cache-Control": "private, max-age=3600" },
       });
     }
     const buffer = await store.get(`file:${id}`, { type: "arrayBuffer" });
