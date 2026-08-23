@@ -32,7 +32,7 @@ async function converterXlsxParaPdf(xlsxBytes) {
     body: JSON.stringify({
       tasks: {
         importar: { operation: "import/upload" },
-        converter: { operation: "convert", input: "importar", output_format: "pdf" },
+        converter: { operation: "convert", input: "importar", input_format: "xlsx", output_format: "pdf" },
         exportar: { operation: "export/url", input: "converter" },
       },
     }),
