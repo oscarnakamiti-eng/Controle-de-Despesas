@@ -1228,14 +1228,18 @@ function App() {
                 <p className="font-display text-sm font-bold uppercase tracking-wide text-amber-600">Passo 2 — Depois da viagem</p>
                 <h3 className="font-display text-lg font-bold">Prestação de contas</h3>
                 <p className="mt-1 text-sm text-slate-600">Usa os {sorted.length} lançamento(s) da tabela de despesas (total {formatValor(totalGeral)}).</p>
-                <label className="mt-3 block max-w-xs">
-                  <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Valor que foi adiantado *</span>
-                  <input value={valorAdiantamento} onChange={(e) => setValorAdiantamento(e.target.value)} placeholder="0,00" inputMode="decimal"
-                    className="w-full rounded border border-slate-300 px-2 py-1.5 text-right text-sm font-mono-num" />
-                </label>
-                <p className="mt-1 text-xs text-slate-400">Preenchido automaticamente com o valor pedido na solicitação de adiantamento — ajuste aqui se o valor recebido foi diferente.</p>
+                <div className="mt-3 max-w-xs rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
+                  <div className="flex items-center justify-between text-xs text-slate-500">
+                    <span>Valor adiantado (pedido no passo 1)</span>
+                    <span className="font-mono-num">{formatValor(parseValorInput(valorAdiantamento))}</span>
+                  </div>
+                  <div className={`mt-1.5 flex items-center justify-between border-t border-slate-200 pt-1.5 text-sm font-semibold ${(parseValorInput(valorAdiantamento) - totalGeral) >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                    <span>{(parseValorInput(valorAdiantamento) - totalGeral) >= 0 ? "Saldo a devolver" : "Saldo a reembolsar"}</span>
+                    <span className="font-mono-num">{formatValor(Math.abs(parseValorInput(valorAdiantamento) - totalGeral))}</span>
+                  </div>
+                </div>
                 {parseValorInput(valorAdiantamento) <= 0 && (
-                  <p className="mt-1 text-xs text-amber-700">Obrigatório — a prestação de contas é sempre referente a um adiantamento.</p>
+                  <p className="mt-1 text-xs text-amber-700">Nenhum valor de adiantamento encontrado — gere a solicitação de adiantamento (passo 1) primeiro.</p>
                 )}
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button onClick={() => baixarPlanilha("prestacao-contas")} disabled={gerando || parseValorInput(valorAdiantamento) <= 0}
