@@ -100,36 +100,52 @@ async function converterPdfEmImagens(id, base64, onProgress) {
     canvas.height = viewport.height;
     await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
     const png = canvas.toDataURL("image/png").split(",")[1];
-    await fetch("/.netlify/functions/upload-preview", {
+    const res = await fetch("/.netlify/functions/upload-preview", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, page: n, base64: png }),
     });
+    await parseJsonResponse(res);
   }
   return total;
 }
 
 // --- chamadas às Netlify Functions ---
+
+// O corpo da requisição (arquivo em base64 + JSON) passa pelo limite de ~6 MB
+// do AWS Lambda; nesse caso o servidor devolve uma resposta vazia/não-JSON.
+// Aqui isso vira uma mensagem clara em vez de um erro de "JSON inválido".
+async function parseJsonResponse(res) {
+  const text = await res.text();
+  let data = null;
+  if (text) {
+    try { data = JSON.parse(text); } catch { /* resposta não era JSON */ }
+  }
+  if (data === null) {
+    if (res.status === 413 || (!res.ok && !text)) {
+      throw new Error("Arquivo muito grande para o servidor (limite de ~6 MB). Tente uma foto ou um PDF menor.");
+    }
+    throw new Error(`Resposta inesperada do servidor (HTTP ${res.status}).`);
+  }
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
 async function apiGet(fn) {
   const res = await fetch(`/.netlify/functions/${fn}`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  return parseJsonResponse(res);
 }
 async function apiPost(fn, payload) {
   const res = await fetch(`/.netlify/functions/${fn}`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data;
+  return parseJsonResponse(res);
 }
 async function callExtract(id, base64, mediaType, isPdf, fileName) {
   const res = await fetch("/.netlify/functions/extract", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id, base64, mediaType, isPdf, fileName }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || `Falha na leitura (HTTP ${res.status})`);
-  return data;
+  return parseJsonResponse(res);
 }
 
 // Converte um PDF que já está no servidor (lançamento antigo ou conversão que falhou)
@@ -238,7 +254,6 @@ function App() {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ records, etag: recordsEtag }),
         });
-        const data = await res.json().catch(() => ({}));
         if (res.status === 409) {
           showToast("Outra pessoa salvou alterações nesta tabela ao mesmo tempo. Recarregando os dados mais recentes — refaça sua última edição se precisar.", true);
           const fresh = await apiGet("records");
@@ -246,7 +261,7 @@ function App() {
           setRecordsEtag(fresh.etag ?? null);
           return;
         }
-        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        const data = await parseJsonResponse(res);
         setRecordsEtag(data.etag ?? null);
       } catch (e) {
         showToast(`Falha ao salvar despesas: ${e.message}`, true);
