@@ -942,7 +942,7 @@ function App() {
 
   const NavBtn = ({ id, children }) => (
     <button onClick={() => setView(id)}
-      className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${view === id ? "bg-amber-400 text-slate-900" : "text-slate-300 hover:bg-slate-800"}`}>
+      className={`rounded-md px-2 py-1 text-xs font-medium transition-colors sm:px-3 sm:py-1.5 sm:text-sm ${view === id ? "bg-amber-400 text-slate-900" : "text-slate-300 hover:bg-slate-800"}`}>
       {children}
     </button>
   );
@@ -975,7 +975,7 @@ function App() {
               <p className="font-mono-num text-2xl font-semibold text-amber-400 sm:text-3xl">{formatValor(totalGeral)}</p>
             </div>
           </div>
-          <nav className="mt-4 flex flex-wrap gap-1">
+          <nav className="mt-4 flex flex-nowrap gap-0.5 sm:gap-1">
             <NavBtn id="tabela">Despesas</NavBtn>
             <NavBtn id="gerar">Formulários</NavBtn>
             <NavBtn id="relatorio">Imagens</NavBtn>
