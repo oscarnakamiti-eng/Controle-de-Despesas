@@ -149,9 +149,10 @@ export default async (req) => {
       const larguraDisponivel = LARGURA - MARGEM * 2;
       const temObs = !!p.obs;
 
-      // Cabeçalho: data e tipo, alinhado à esquerda.
+      // Cabeçalho: data, tipo e valor, alinhado à esquerda.
       try {
-        const cabecalho = textoSeguro(`${p.data || ""}   -   ${p.tipo || ""}`);
+        const valorFmt = (Number(p.valor) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const cabecalho = textoSeguro(`${p.data || ""}   -   ${p.tipo || ""}   -   R$ ${valorFmt}`);
         const tam = ajustarTamanho(fonteNegrito, cabecalho, 11, larguraDisponivel);
         page.drawText(cabecalho, { x: MARGEM, y: topo - 10, size: tam, font: fonteNegrito, color: rgb(0.1, 0.1, 0.15) });
       } catch { /* ignora */ }
