@@ -33,7 +33,7 @@ export default async (req) => {
 
   const n = Number(page) || 1;
   try {
-    const store = getStore("expense-tracker");
+    const store = getStore("expense-tracker", { consistency: "strong" });
     await gravarComConfirmacao(store, `preview:${id}:${n}`, Buffer.from(base64, "base64"));
     return json({ ok: true, page: n });
   } catch (err) {

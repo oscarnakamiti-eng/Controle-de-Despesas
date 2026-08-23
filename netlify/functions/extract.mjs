@@ -86,7 +86,7 @@ export default async (req) => {
   // Guarda o arquivo original nos Blobs para uso posterior (preview / relatório fotográfico)
   if (id) {
     try {
-      const store = getStore("expense-tracker");
+      const store = getStore("expense-tracker", { consistency: "strong" });
       const bytes = Buffer.from(base64, "base64");
       await gravarComConfirmacao(store, `file:${id}`, bytes);
       await store.setJSON(`file-meta:${id}`, { mediaType: isPdf ? "application/pdf" : (mediaType || "image/jpeg"), fileName: fileName || null });
