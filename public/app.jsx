@@ -896,7 +896,7 @@ function App() {
       const precisaPdf = !isAdiantamentoReq && reportPages.length > 0;
       showToast(
         precisaPdf && !temPdf
-          ? "Zip salvo, mas o relatório em PDF falhou — tente de novo pela aba Relatório fotográfico."
+          ? "Zip salvo, mas o relatório em PDF falhou — tente de novo pela aba Imagens."
           : avisoConversao || "Zip salvo com a planilha, o relatório e as fotos. Despesas zeradas para o próximo ciclo.",
         (precisaPdf && !temPdf) || !!avisoConversao
       );
@@ -977,8 +977,8 @@ function App() {
           </div>
           <nav className="mt-4 flex flex-wrap gap-1">
             <NavBtn id="tabela">Despesas</NavBtn>
-            <NavBtn id="gerar">Gerar formulários</NavBtn>
-            <NavBtn id="relatorio">Relatório fotográfico</NavBtn>
+            <NavBtn id="gerar">Formulários</NavBtn>
+            <NavBtn id="relatorio">Imagens</NavBtn>
             <NavBtn id="perfil">Cadastros</NavBtn>
           </nav>
         </div>
