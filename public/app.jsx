@@ -764,11 +764,20 @@ function App() {
     "prestacao-contas": "prestacao-contas-adiantamento.xlsx",
     "reembolso": "solicitacao-reembolso.xlsx",
   };
+  const ZIP_NOMES = {
+    "solicitacao-adiantamento": "solicitacao-adiantamento.zip",
+    "prestacao-contas": "prestacao-contas.zip",
+    "reembolso": "solicitacao-reembolso.zip",
+  };
 
-  // Gera a planilha oficial (e o relatório fotográfico em PDF, quando cabe),
-  // deixa o usuário escolher onde salvar cada arquivo, e zera a tabela/
-  // formulário pra deixar pronto pro próximo ciclo. Nada fica arquivado no
-  // servidor — a empresa já controla os relatórios gerados em outra ferramenta.
+  // Gera a planilha oficial, o relatório fotográfico em PDF (quando cabe) e
+  // as fotos dos comprovantes, empacota tudo num único .zip e deixa o
+  // usuário escolher onde salvar — um só diálogo. Chamar salvarArquivoComo
+  // várias vezes seguidas no mesmo clique não funciona de forma confiável:
+  // o navegador só reconhece a primeira chamada como ação direta do
+  // usuário e bloqueia silenciosamente as seguintes. Zera a tabela/
+  // formulário no fim. Nada fica arquivado no servidor — a empresa já
+  // controla os relatórios gerados em outra ferramenta.
   const baixarPlanilha = async (tipo) => {
     if (tipo === "prestacao-contas" && parseValorInput(valorAdiantamento) <= 0) {
       showToast("Informe o valor que foi adiantado — a prestação de contas é sempre referente a um adiantamento.", true);
@@ -793,7 +802,7 @@ function App() {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || `HTTP ${res.status}`);
       }
-      await salvarArquivoComo(await res.blob(), XLSX_NOMES[tipo]);
+      const arquivosZip = { [XLSX_NOMES[tipo]]: new Uint8Array(await res.arrayBuffer()) };
 
       let temPdf = false;
       if (!isAdiantamentoReq && reportPages.length > 0) {
@@ -804,14 +813,24 @@ function App() {
               pages: reportPages.map((r) => ({ id: r.id, page: r.page, mediaType: r.mediaType, data: r.data, tipo: r.tipo, valor: r.valor, obs: r.obs })),
             }),
           });
-          if (resPdf.ok) { await salvarArquivoComo(await resPdf.blob(), `relatorio-fotografico-${tipo}.pdf`); temPdf = true; }
-        } catch { /* o Excel já foi gerado; o relatório em PDF fica só pendente */ }
+          if (resPdf.ok) {
+            arquivosZip[`relatorio-fotografico-${tipo}.pdf`] = new Uint8Array(await resPdf.arrayBuffer());
+            temPdf = true;
+          }
+        } catch { /* o Excel já foi montado; o relatório em PDF fica só pendente */ }
 
-        try {
-          const zipBlob = await construirZipComprovantes();
-          if (zipBlob) await salvarArquivoComo(zipBlob, `comprovantes-${tipo}.zip`);
-        } catch { /* Excel e PDF já gerados; o zip de fotos fica só pendente */ }
+        for (let i = 0; i < reportPages.length; i++) {
+          const r = reportPages[i];
+          if (!r.src) continue;
+          try {
+            const resImg = await fetch(r.src);
+            if (resImg.ok) arquivosZip[`fotos/${nomeArquivoComprovante(r, i)}`] = new Uint8Array(await resImg.arrayBuffer());
+          } catch { /* essa foto fica de fora do zip */ }
+        }
       }
+
+      const zipBytes = window.fflate.zipSync(arquivosZip, { level: 6 });
+      await salvarArquivoComo(new Blob([zipBytes], { type: "application/zip" }), ZIP_NOMES[tipo]);
 
       if (isAdiantamentoReq) setPrevisoes([]); else setRecords([]);
       setMotivo(""); setRateio([]);
@@ -820,8 +839,8 @@ function App() {
       const precisaPdf = !isAdiantamentoReq && reportPages.length > 0;
       showToast(
         precisaPdf && !temPdf
-          ? "Planilha gerada, mas o relatório em PDF falhou — tente de novo pela aba Relatório fotográfico."
-          : "Planilha gerada. Despesas zeradas para o próximo ciclo.",
+          ? "Zip salvo, mas o relatório em PDF falhou — tente de novo pela aba Relatório fotográfico."
+          : "Zip salvo com a planilha, o relatório e as fotos. Despesas zeradas para o próximo ciclo.",
         precisaPdf && !temPdf
       );
     } catch (e) {
