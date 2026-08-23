@@ -37,6 +37,11 @@ continuam funcionando depois de fechar ou recarregar a página.
 - `rateio.mjs` — presets de rateio.
 - `generate-report.mjs` — preenche os modelos oficiais em `templates/` preservando
   integralmente layout, fórmulas, bordas e a logomarca do formulário.
+- `generate-photo-report.mjs` — monta o relatório fotográfico em PDF a partir dos
+  comprovantes já guardados. Se `CLOUDCONVERT_API_KEY` estiver configurada, converte
+  a planilha gerada em PDF (via [CloudConvert](https://cloudconvert.com)) e a
+  inclui como primeira página; sem a chave, ou se a conversão falhar, o relatório
+  sai normalmente só com as fotos.
 
 ## Modelos (`netlify/functions/templates/`)
 
@@ -64,6 +69,9 @@ sobrepostas, com a logomarca preservada e fórmulas recalculando sem erro.
    functions `netlify/functions`, e inclui os modelos `.xlsx` no bundle).
 3. **Site settings → Environment variables** → adicione `ANTHROPIC_API_KEY`
    (chave criada em console.anthropic.com → API Keys, com billing ativo).
+   Opcionalmente, adicione `CLOUDCONVERT_API_KEY` (conta gratuita em
+   cloudconvert.com → API Keys) para incluir a planilha como primeira página
+   do relatório fotográfico.
 4. **Deploys → Trigger deploy** para aplicar a variável.
 
 Depois disso, cada commit na `main` gera um novo deploy automático.

@@ -218,18 +218,23 @@ async function callExtract(id, base64, mediaType, isPdf, fileName) {
   return parseJsonResponse(res);
 }
 
-// Converte um PDF que já está no servidor (lançamento antigo ou conversão que falhou)
-async function converterPdfExistente(id, onProgress) {
-  const res = await fetch(fileUrl(id));
-  if (!res.ok) throw new Error(`Não foi possível baixar o arquivo (HTTP ${res.status})`);
-  const buf = await res.arrayBuffer();
+// Uint8Array -> base64, em pedaços pra não estourar o limite de argumentos
+// do String.fromCharCode com arquivos maiores.
+function uint8ParaBase64(bytes) {
   let bin = "";
-  const bytes = new Uint8Array(buf);
   const chunk = 0x8000;
   for (let i = 0; i < bytes.length; i += chunk) {
     bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
   }
-  return converterPdfEmImagens(id, btoa(bin), onProgress);
+  return btoa(bin);
+}
+
+// Converte um PDF que já está no servidor (lançamento antigo ou conversão que falhou)
+async function converterPdfExistente(id, onProgress) {
+  const res = await fetch(fileUrl(id));
+  if (!res.ok) throw new Error(`Não foi possível baixar o arquivo (HTTP ${res.status})`);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  return converterPdfEmImagens(id, uint8ParaBase64(bytes), onProgress);
 }
 
 function Field({ label, value, onChange, placeholder, className = "" }) {
@@ -802,18 +807,23 @@ function App() {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || `HTTP ${res.status}`);
       }
-      const arquivosZip = { [XLSX_NOMES[tipo]]: new Uint8Array(await res.arrayBuffer()) };
+      const xlsxBytes = new Uint8Array(await res.arrayBuffer());
+      const arquivosZip = { [XLSX_NOMES[tipo]]: xlsxBytes };
 
       let temPdf = false;
+      let avisoConversao = null;
       if (!isAdiantamentoReq && reportPages.length > 0) {
         try {
           const resPdf = await fetch("/.netlify/functions/generate-photo-report", {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
+              xlsxBase64: uint8ParaBase64(xlsxBytes),
               pages: reportPages.map((r) => ({ id: r.id, page: r.page, mediaType: r.mediaType, data: r.data, tipo: r.tipo, valor: r.valor, obs: r.obs })),
             }),
           });
           if (resPdf.ok) {
+            const aviso = resPdf.headers.get("X-Aviso");
+            if (aviso) avisoConversao = decodeURIComponent(aviso);
             arquivosZip[`relatorio-fotografico-${tipo}.pdf`] = new Uint8Array(await resPdf.arrayBuffer());
             temPdf = true;
           }
@@ -840,8 +850,8 @@ function App() {
       showToast(
         precisaPdf && !temPdf
           ? "Zip salvo, mas o relatório em PDF falhou — tente de novo pela aba Relatório fotográfico."
-          : "Zip salvo com a planilha, o relatório e as fotos. Despesas zeradas para o próximo ciclo.",
-        precisaPdf && !temPdf
+          : avisoConversao || "Zip salvo com a planilha, o relatório e as fotos. Despesas zeradas para o próximo ciclo.",
+        (precisaPdf && !temPdf) || !!avisoConversao
       );
     } catch (e) {
       showToast(`Erro ao gerar planilha: ${e.message}`, true);
