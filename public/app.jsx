@@ -1,6 +1,7 @@
 const { useState, useEffect, useRef, useCallback, Fragment } = React;
 
 const TIPOS = ["Almoço", "Jantar", "Combustível", "Hospedagem", "Materiais e Serviços"];
+const LIMITE_REFEICAO = 35;
 
 const TIPO_STYLE = {
   "Almoço": "bg-amber-100 text-amber-800 border-amber-300",
@@ -102,28 +103,46 @@ async function comprimirImagem(file, maxDim = 2000, quality = 0.85) {
 // navegador suporta (Chrome/Edge); em navegadores sem suporte (Firefox,
 // Safari) ou se o diálogo falhar por outro motivo, cai no download comum
 // (pasta de Downloads padrão). Cancelar o diálogo não é tratado como erro.
-async function salvarArquivoComo(blob, nomeSugerido) {
-  if (window.showSaveFilePicker) {
+// O navegador só reconhece showSaveFilePicker como ação direta do usuário
+// por uma janela curta após o clique. Se o arquivo demora pra ficar pronto
+// (gera planilha, converte em PDF, baixa fotos — vários segundos), pedir o
+// local DEPOIS de tudo pronto já chega tarde demais e cai sem avisar no
+// download direto da pasta padrão. Por isso a escolha do local é separada
+// da escrita: pedirLocalParaSalvar() deve ser chamada assim que o usuário
+// clica, ANTES de qualquer trabalho demorado; escreverArquivo() só grava no
+// que já foi escolhido (ou cai no download comum se não houver escolha).
+async function pedirLocalParaSalvar(nomeSugerido, mimeType) {
+  if (!window.showSaveFilePicker) return null;
+  try {
+    const ext = "." + (nomeSugerido.split(".").pop() || "bin");
+    return await window.showSaveFilePicker({
+      suggestedName: nomeSugerido,
+      types: [{ description: "Arquivo", accept: { [mimeType || "application/octet-stream"]: [ext] } }],
+    });
+  } catch (e) {
+    return null; // cancelado ou sem suporte: cai no download comum na hora de escrever
+  }
+}
+async function escreverArquivo(handle, blob, nomeSugerido) {
+  if (handle) {
     try {
-      const ext = "." + (nomeSugerido.split(".").pop() || "bin");
-      const handle = await window.showSaveFilePicker({
-        suggestedName: nomeSugerido,
-        types: [{ description: "Arquivo", accept: { [blob.type || "application/octet-stream"]: [ext] } }],
-      });
       const writable = await handle.createWritable();
       await writable.write(blob);
       await writable.close();
       return;
-    } catch (e) {
-      if (e && e.name === "AbortError") return; // usuário cancelou o diálogo
-      // qualquer outro erro: segue para o download comum abaixo
-    }
+    } catch { /* handle inválido por algum motivo: cai no download comum abaixo */ }
   }
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = nomeSugerido;
   a.click();
   URL.revokeObjectURL(a.href);
+}
+// Atalho pra quando não há trabalho demorado entre o clique e o arquivo
+// pronto (ex.: baixar um comprovante já carregado) — pede e escreve direto.
+async function salvarArquivoComo(blob, nomeSugerido) {
+  const handle = await pedirLocalParaSalvar(nomeSugerido, blob.type);
+  await escreverArquivo(handle, blob, nomeSugerido);
 }
 // Prepara a imagem da assinatura: reduz o tamanho e converte para JPEG com
 // fundo branco (assinaturas costumam ser PNG com fundo transparente, que sem
@@ -536,6 +555,12 @@ function App() {
       setRecords((prev) => prev.map((r) =>
         r.id === avisoLimite.id ? { ...r, obs: r.obs ? `${r.obs} — ${info}` : info } : r
       ));
+    } else if (!incluirPessoas) {
+      // Sem outras pessoas: não se justifica o valor acima do limite —
+      // ajusta para o teto permitido.
+      setRecords((prev) => prev.map((r) =>
+        r.id === avisoLimite.id ? { ...r, valor: LIMITE_REFEICAO } : r
+      ));
     }
     setAvisoLimite(null);
   };
@@ -591,7 +616,7 @@ function App() {
           valor, fileName: file.name, mediaType, hasFile: !!fileStored, pages,
           status: needsReview ? "revisar" : "ok",
         }]);
-        if ((tipo === "Almoço" || tipo === "Jantar") && valor > 35) {
+        if ((tipo === "Almoço" || tipo === "Jantar") && valor > LIMITE_REFEICAO) {
           setFilaAvisoLimite((prev) => [...prev, recId]);
         }
         if (convErro) {
@@ -777,12 +802,10 @@ function App() {
 
   // Gera a planilha oficial, o relatório fotográfico em PDF (quando cabe) e
   // as fotos dos comprovantes, empacota tudo num único .zip e deixa o
-  // usuário escolher onde salvar — um só diálogo. Chamar salvarArquivoComo
-  // várias vezes seguidas no mesmo clique não funciona de forma confiável:
-  // o navegador só reconhece a primeira chamada como ação direta do
-  // usuário e bloqueia silenciosamente as seguintes. Zera a tabela/
-  // formulário no fim. Nada fica arquivado no servidor — a empresa já
-  // controla os relatórios gerados em outra ferramenta.
+  // usuário escolher onde salvar — um só diálogo, pedido ANTES de gerar
+  // qualquer coisa (ver pedirLocalParaSalvar). Zera a tabela/formulário no
+  // fim. Nada fica arquivado no servidor — a empresa já controla os
+  // relatórios gerados em outra ferramenta.
   const baixarPlanilha = async (tipo) => {
     if (tipo === "prestacao-contas" && parseValorInput(valorAdiantamento) <= 0) {
       showToast("Informe o valor que foi adiantado — a prestação de contas é sempre referente a um adiantamento.", true);
@@ -796,6 +819,12 @@ function App() {
       `Isso vai gerar e baixar o formulário, o relatório fotográfico e as fotos num .zip. ` +
       `Assim que terminar, ${alvoZerado} serão apagados (junto com motivo e rateio), para começar o próximo ciclo. Continuar?`
     )) return;
+
+    // Pede o local de salvamento JÁ, antes de gerar qualquer coisa: a
+    // geração (planilha + conversão em PDF + fotos) demora vários segundos,
+    // e depois desse tempo o navegador não deixa mais abrir o diálogo nativo
+    // como ação do usuário — cairia direto na pasta de Downloads sem avisar.
+    const handle = await pedirLocalParaSalvar(ZIP_NOMES[tipo], "application/zip");
 
     setGerando(true);
     const registrosCompletos = isAdiantamentoReq ? [] : sorted.map(({ dateObj, ...resto }) => resto);
@@ -848,7 +877,7 @@ function App() {
       }
 
       const zipBytes = window.fflate.zipSync(arquivosZip, { level: 6 });
-      await salvarArquivoComo(new Blob([zipBytes], { type: "application/zip" }), ZIP_NOMES[tipo]);
+      await escreverArquivo(handle, new Blob([zipBytes], { type: "application/zip" }), ZIP_NOMES[tipo]);
 
       if (isAdiantamentoReq) setPrevisoes([]); else setRecords([]);
       setMotivo(""); setRateio([]);
@@ -1055,7 +1084,7 @@ function App() {
                   <Fragment key={w.monday.getTime()}>
                     <tr><td colSpan={6} className="bg-slate-800 px-3 py-1.5 font-display text-xs uppercase tracking-wide text-amber-300">Semana de {w.label}</td></tr>
                     {w.rows.map((r) => {
-                      const overLimit = (r.tipo === "Almoço" || r.tipo === "Jantar") && r.valor > 35;
+                      const overLimit = (r.tipo === "Almoço" || r.tipo === "Jantar") && r.valor > LIMITE_REFEICAO;
                       if (editingId === r.id && editDraft) {
                         return <EditRow key={r.id} draft={editDraft} setDraft={setEditDraft} onSave={() => saveEdit(r.id)} onCancel={() => { setEditingId(null); setEditDraft(null); }} />;
                       }
@@ -1075,7 +1104,7 @@ function App() {
                           </td>
                           <td className="px-3 py-2 text-slate-600">
                             {r.obs || <span className="text-slate-300">—</span>}
-                            {overLimit && <div className="mt-0.5 text-xs text-red-600">Acima do limite de 35,00</div>}
+                            {overLimit && <div className="mt-0.5 text-xs text-red-600">Acima do limite de {formatValor(LIMITE_REFEICAO)}</div>}
                           </td>
                           <td className="whitespace-nowrap px-3 py-2 text-right font-mono-num">{formatValor(r.valor)}</td>
                           <td className="no-print whitespace-nowrap px-3 py-2">
@@ -1387,14 +1416,14 @@ function App() {
               </div>
               <p className="mt-2 text-sm text-slate-600">
                 {rec.tipo} de {rec.data} no valor de <span className="font-mono-num font-semibold">{formatValor(rec.valor)}</span> está
-                acima do limite de R$ 35,00. Essa despesa inclui mais de uma pessoa?
+                acima do limite de {formatValor(LIMITE_REFEICAO)}. Essa despesa inclui mais de uma pessoa?
               </p>
               <div className="mt-3 space-y-2">
                 <Field label="Quantas pessoas" value={avisoLimite.pessoas} onChange={(v) => setAvisoLimite({ ...avisoLimite, pessoas: v })} placeholder="Ex.: 3" />
                 <Field label="Nomes das pessoas" value={avisoLimite.nomes} onChange={(v) => setAvisoLimite({ ...avisoLimite, nomes: v })} placeholder="Ex.: João, Maria" />
               </div>
               <div className="mt-4 flex justify-end gap-2">
-                <button onClick={() => confirmarAvisoLimite(false)} className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Não, é só isso</button>
+                <button onClick={() => confirmarAvisoLimite(false)} className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Não — ajustar para {formatValor(LIMITE_REFEICAO)}</button>
                 <button onClick={() => confirmarAvisoLimite(true)} className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800">Registrar pessoas</button>
               </div>
             </div>
