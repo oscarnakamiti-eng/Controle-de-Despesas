@@ -224,6 +224,7 @@ function Field({ label, value, onChange, placeholder, className = "" }) {
 function EditRow({ draft, setDraft, onSave, onCancel }) {
   return (
     <tr className="bg-slate-50">
+      <td className="no-print px-3 py-2 align-top"></td>
       <td className="px-3 py-2 align-top">
         <input value={draft.data} onChange={(e) => setDraft({ ...draft, data: e.target.value })}
           placeholder="DD/MM/AAAA" maxLength={10}
@@ -273,6 +274,7 @@ function App() {
   const [previewId, setPreviewId] = useState(null);
   const [toast, setToast] = useState(null);
   const [historico, setHistorico] = useState([]);
+  const [selecionados, setSelecionados] = useState(() => new Set());
   const fileInputRef = useRef(null);
   const assinaturaInputRef = useRef(null);
   const dropRef = useRef(null);
@@ -445,6 +447,25 @@ function App() {
     if (!window.confirm("Excluir este lançamento e o arquivo do comprovante? Esta ação não pode ser desfeita.")) return;
     setRecords((prev) => prev.filter((x) => x.id !== r.id));
     if (r.hasFile) { try { await fetch(`${fileUrl(r.id)}&pages=${Number(r.pages) || 0}`, { method: "DELETE" }); } catch {} }
+  };
+
+  const toggleSelecionado = (id) => {
+    setSelecionados((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const excluirSelecionados = async () => {
+    const alvos = records.filter((r) => selecionados.has(r.id));
+    if (alvos.length === 0) return;
+    if (!window.confirm(`Excluir ${alvos.length} lançamento(s) selecionado(s) e os comprovantes anexados? Esta ação não pode ser desfeita.`)) return;
+    setRecords((prev) => prev.filter((r) => !selecionados.has(r.id)));
+    setSelecionados(new Set());
+    await Promise.all(alvos.filter((r) => r.hasFile).map((r) =>
+      fetch(`${fileUrl(r.id)}&pages=${Number(r.pages) || 0}`, { method: "DELETE" }).catch(() => {})
+    ));
   };
   const saveAddNew = () => {
     const d = parseDatePtBr(newDraft.data);
@@ -776,6 +797,19 @@ function App() {
             )}
           </div>
 
+          {selecionados.size > 0 && (
+            <div className="no-print mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2">
+              <span className="text-sm text-red-900">{selecionados.size} lançamento(s) selecionado(s)</span>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setSelecionados(new Set())} className="text-xs font-medium text-slate-500 hover:text-slate-700">Limpar seleção</button>
+                <button onClick={excluirSelecionados}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700">
+                  <TrashIcon size={15} /> Excluir selecionados
+                </button>
+              </div>
+            </div>
+          )}
+
           {pdfsPendentes.length > 0 && (
             <div className="no-print mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2">
               <span className="text-sm text-sky-900">
@@ -792,6 +826,13 @@ function App() {
             <table className="min-w-full divide-y divide-slate-200 text-sm">
               <thead className="bg-slate-50">
                 <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="no-print px-3 py-2">
+                    <input type="checkbox" aria-label="Selecionar todos"
+                      checked={sorted.length > 0 && sorted.every((r) => selecionados.has(r.id))}
+                      onChange={() => setSelecionados((prev) =>
+                        sorted.every((r) => prev.has(r.id)) ? new Set() : new Set(sorted.map((r) => r.id))
+                      )} />
+                  </th>
                   <th className="px-3 py-2">Data</th><th className="px-3 py-2">Tipo</th>
                   <th className="px-3 py-2">Histórico</th><th className="px-3 py-2 text-right">Valor</th>
                   <th className="no-print px-3 py-2">Ações</th>
@@ -800,20 +841,23 @@ function App() {
               <tbody className="divide-y divide-slate-100">
                 {addingNew && newDraft && <EditRow draft={newDraft} setDraft={setNewDraft} onSave={saveAddNew} onCancel={() => { setAddingNew(false); setNewDraft(null); }} />}
                 {weeks.length === 0 && !addingNew && (
-                  <tr><td colSpan={5} className="px-3 py-10 text-center text-sm text-slate-400">
+                  <tr><td colSpan={6} className="px-3 py-10 text-center text-sm text-slate-400">
                     Nenhum lançamento ainda. Envie comprovantes acima ou adicione manualmente.
                   </td></tr>
                 )}
                 {weeks.map((w) => (
                   <Fragment key={w.monday.getTime()}>
-                    <tr><td colSpan={5} className="bg-slate-800 px-3 py-1.5 font-display text-xs uppercase tracking-wide text-amber-300">Semana de {w.label}</td></tr>
+                    <tr><td colSpan={6} className="bg-slate-800 px-3 py-1.5 font-display text-xs uppercase tracking-wide text-amber-300">Semana de {w.label}</td></tr>
                     {w.rows.map((r) => {
                       const overLimit = (r.tipo === "Almoço" || r.tipo === "Jantar") && r.valor > 35;
                       if (editingId === r.id && editDraft) {
                         return <EditRow key={r.id} draft={editDraft} setDraft={setEditDraft} onSave={() => saveEdit(r.id)} onCancel={() => { setEditingId(null); setEditDraft(null); }} />;
                       }
                       return (
-                        <tr key={r.id} className="hover:bg-stone-50">
+                        <tr key={r.id} className={`hover:bg-stone-50 ${selecionados.has(r.id) ? "bg-red-50" : ""}`}>
+                          <td className="no-print px-3 py-2">
+                            <input type="checkbox" checked={selecionados.has(r.id)} onChange={() => toggleSelecionado(r.id)} />
+                          </td>
                           <td className="whitespace-nowrap px-3 py-2 font-mono-num">
                             <div className="flex items-center gap-1.5">
                               {r.status === "revisar" && <AlertIcon size={13} className="shrink-0 text-amber-500" />}
@@ -839,12 +883,12 @@ function App() {
                       );
                     })}
                     <tr className="border-t-2 border-amber-400 bg-amber-50">
-                      <td colSpan={3} className="px-3 py-1.5 text-xs font-semibold text-slate-700">Subtotal da semana</td>
+                      <td colSpan={4} className="px-3 py-1.5 text-xs font-semibold text-slate-700">Subtotal da semana</td>
                       <td className="whitespace-nowrap px-3 py-1.5 text-right font-mono-num font-semibold">{formatValor(w.subtotal)}</td>
                       <td className="no-print"></td>
                     </tr>
                     <tr className="bg-stone-50 text-xs text-slate-500">
-                      <td colSpan={3} className="px-3 py-1 text-right">Acumulado até {formatDatePtBr(new Date(w.monday.getTime() + 6 * 86400000))}</td>
+                      <td colSpan={4} className="px-3 py-1 text-right">Acumulado até {formatDatePtBr(new Date(w.monday.getTime() + 6 * 86400000))}</td>
                       <td className="whitespace-nowrap px-3 py-1 text-right font-mono-num">{formatValor(w.cumulative)}</td>
                       <td className="no-print"></td>
                     </tr>
@@ -854,7 +898,7 @@ function App() {
               {weeks.length > 0 && (
                 <tfoot>
                   <tr className="bg-slate-900 text-white">
-                    <td colSpan={3} className="px-3 py-2.5 font-display text-sm font-semibold uppercase tracking-wide">Total acumulado</td>
+                    <td colSpan={4} className="px-3 py-2.5 font-display text-sm font-semibold uppercase tracking-wide">Total acumulado</td>
                     <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono-num text-base font-bold text-amber-400">{formatValor(totalGeral)}</td>
                     <td className="no-print"></td>
                   </tr>
