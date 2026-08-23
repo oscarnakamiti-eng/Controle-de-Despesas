@@ -18,7 +18,9 @@ function json(body, status = 200) {
 }
 
 export default async (req) => {
-  const store = getStore("expense-tracker");
+  // Consistência forte: o item precisa aparecer na lista assim que é
+  // registrado (logo depois de gerar a planilha), sem esperar propagação.
+  const store = getStore("expense-tracker", { consistency: "strong" });
   const url = new URL(req.url);
 
   if (req.method === "GET") {
