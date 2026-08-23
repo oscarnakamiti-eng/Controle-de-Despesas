@@ -10,6 +10,12 @@ const TIPO_STYLE = {
   "Materiais e Serviços": "bg-slate-200 text-slate-800 border-slate-400",
 };
 
+const TIPO_LABEL = {
+  "solicitacao-adiantamento": "Solicitação de adiantamento",
+  "prestacao-contas": "Prestação de contas",
+  "reembolso": "Solicitação de reembolso",
+};
+
 function Icon({ children, size = 16, className = "", ...props }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -244,6 +250,7 @@ function App() {
   const [newDraft, setNewDraft] = useState(null);
   const [previewId, setPreviewId] = useState(null);
   const [toast, setToast] = useState(null);
+  const [historico, setHistorico] = useState([]);
   const fileInputRef = useRef(null);
   const dropRef = useRef(null);
 
@@ -254,6 +261,13 @@ function App() {
   const [rateio, setRateio] = useState([]);
   const [previsoes, setPrevisoes] = useState([]);
   const [gerando, setGerando] = useState(false);
+
+  const carregarHistorico = useCallback(async () => {
+    try {
+      const h = await apiGet("historico");
+      setHistorico(h.items || []);
+    } catch { /* histórico é auxiliar — falha aqui não bloqueia o app */ }
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -267,8 +281,9 @@ function App() {
       } catch (e) {
         setLoadError(String(e.message || e));
       } finally { setLoaded(true); }
+      carregarHistorico();
     })();
-  }, []);
+  }, [carregarHistorico]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -432,31 +447,114 @@ function App() {
     catch (e) { showToast(`Erro ao salvar: ${e.message}`, true); }
   };
 
+  const baixarBlob = (blob, nome) => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = nome;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  const XLSX_NOMES = {
+    "solicitacao-adiantamento": "solicitacao-adiantamento.xlsx",
+    "prestacao-contas": "prestacao-contas-adiantamento.xlsx",
+    "reembolso": "solicitacao-reembolso.xlsx",
+  };
+
+  // Gera a planilha oficial (e o relatório fotográfico em PDF, quando cabe),
+  // baixa os dois, arquiva ambos no histórico e zera a tabela/formulário
+  // pra deixar pronto pro próximo ciclo.
   const baixarPlanilha = async (tipo) => {
     setGerando(true);
+    const historyId = `hist-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const isAdiantamentoReq = tipo === "solicitacao-adiantamento";
+    const registrosCompletos = isAdiantamentoReq ? [] : sorted.map(({ dateObj, ...resto }) => resto);
+    const itensParaPlanilha = registrosCompletos.map((r) => ({ data: r.data, tipo: r.tipo, obs: r.obs, valor: r.valor }));
+    const itensPrevisoes = isAdiantamentoReq ? previsoes.map((p) => ({ obs: p.obs, valor: parseValorInput(p.valor) })) : [];
+
     try {
       const res = await fetch("/.netlify/functions/generate-report", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tipo, profile, motivo, rateio,
           valorAdiantamento: parseValorInput(valorAdiantamento),
-          records: sorted.map((r) => ({ data: r.data, tipo: r.tipo, obs: r.obs, valor: r.valor })),
-          previsoes: previsoes.map((p) => ({ obs: p.obs, valor: parseValorInput(p.valor) })),
+          records: itensParaPlanilha, previsoes: itensPrevisoes, historyId,
         }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || `HTTP ${res.status}`);
       }
-      const blob = await res.blob();
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = { "solicitacao-adiantamento": "solicitacao-adiantamento.xlsx", "prestacao-contas": "prestacao-contas-adiantamento.xlsx", "reembolso": "solicitacao-reembolso.xlsx" }[tipo];
-      a.click();
-      URL.revokeObjectURL(a.href);
+      baixarBlob(await res.blob(), XLSX_NOMES[tipo]);
+
+      let temPdf = false;
+      if (!isAdiantamentoReq && reportPages.length > 0) {
+        try {
+          const resPdf = await fetch("/.netlify/functions/generate-photo-report", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              historyId,
+              pages: reportPages.map((r) => ({ id: r.id, page: r.page, mediaType: r.mediaType, data: r.data, tipo: r.tipo, valor: r.valor, obs: r.obs })),
+            }),
+          });
+          if (resPdf.ok) { baixarBlob(await resPdf.blob(), `relatorio-fotografico-${tipo}.pdf`); temPdf = true; }
+        } catch { /* o Excel já foi gerado; o relatório em PDF fica só pendente */ }
+      }
+
+      await apiPost("historico", {
+        historyId, tipo, motivo, valorAdiantamento: parseValorInput(valorAdiantamento), rateio,
+        records: registrosCompletos, previsoes: itensPrevisoes, totalGeral,
+        xlsxNome: XLSX_NOMES[tipo], temPdf,
+      }).catch(() => {});
+
+      if (isAdiantamentoReq) setPrevisoes([]); else setRecords([]);
+      setMotivo(""); setRateio([]);
+      if (tipo === "prestacao-contas") setValorAdiantamento("");
+
+      carregarHistorico();
+      const precisaPdf = !isAdiantamentoReq && reportPages.length > 0;
+      showToast(
+        precisaPdf && !temPdf
+          ? "Planilha gerada, mas o relatório em PDF falhou — tente de novo pela aba Histórico."
+          : "Gerado e salvo no histórico. Despesas zeradas para o próximo ciclo.",
+        precisaPdf && !temPdf
+      );
     } catch (e) {
       showToast(`Erro ao gerar planilha: ${e.message}`, true);
     } finally { setGerando(false); }
+  };
+
+  const usarValoresDoHistorico = () => {
+    if (historico.length === 0) { showToast("Nenhum histórico salvo ainda.", true); return; }
+    const ultimo = historico[0];
+    setMotivo(ultimo.motivo || "");
+    setRateio(ultimo.rateio || []);
+    setValorAdiantamento(ultimo.valorAdiantamento ? formatValor(ultimo.valorAdiantamento) : "");
+    showToast("Motivo, valor e rateio da última geração recuperados.");
+  };
+
+  const reabrirHistorico = (item) => {
+    if (!window.confirm("Isso substitui os dados atuais (tabela de despesas ou previsões, motivo e rateio) pelos deste histórico. Continuar?")) return;
+    setMotivo(item.motivo || "");
+    setRateio(item.rateio || []);
+    setValorAdiantamento(item.valorAdiantamento ? formatValor(item.valorAdiantamento) : "");
+    if (item.tipo === "solicitacao-adiantamento") {
+      setPrevisoes((item.previsoes || []).map((p) => ({ obs: p.obs, valor: formatValor(p.valor) })));
+    } else {
+      setRecords(item.records || []);
+    }
+    setView("gerar");
+    showToast("Dados do histórico carregados para edição.");
+  };
+
+  const excluirHistorico = async (item) => {
+    if (!window.confirm("Excluir este item do histórico e os arquivos arquivados? Esta ação não pode ser desfeita.")) return;
+    try {
+      await fetch(`/.netlify/functions/historico?id=${encodeURIComponent(item.id)}`, { method: "DELETE" });
+      setHistorico((prev) => prev.filter((x) => x.id !== item.id));
+    } catch (e) {
+      showToast(`Erro ao excluir: ${e.message}`, true);
+    }
   };
 
   // --- dados derivados ---
@@ -710,12 +808,20 @@ function App() {
           </div>
 
           <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
-            <label className="block">
-              <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Motivo da solicitação</span>
-              <textarea value={motivo} onChange={(e) => setMotivo(e.target.value)} rows={2}
-                placeholder="Ex.: CUSTOS DE REFEIÇÃO, ABASTECIMENTO DO VEÍCULO, GERADOR E RETROESCAVADEIRA DA OBRA, MATERIAIS NECESSÁRIOS PARA OBRA"
-                className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500" />
-            </label>
+            <div className="flex items-center justify-between gap-2">
+              <label className="block flex-1">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Motivo da solicitação</span>
+                <textarea value={motivo} onChange={(e) => setMotivo(e.target.value)} rows={2}
+                  placeholder="Ex.: CUSTOS DE REFEIÇÃO, ABASTECIMENTO DO VEÍCULO, GERADOR E RETROESCAVADEIRA DA OBRA, MATERIAIS NECESSÁRIOS PARA OBRA"
+                  className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500" />
+              </label>
+            </div>
+            {historico.length > 0 && (
+              <button onClick={usarValoresDoHistorico} type="button"
+                className="mt-1.5 text-xs font-medium text-amber-700 hover:text-amber-900">
+                Usar motivo, valor e rateio da última geração
+              </button>
+            )}
 
             <div className="mt-4">
               <div className="mb-2 flex items-center justify-between">
@@ -811,6 +917,37 @@ function App() {
             <p className="mt-3 text-xs text-amber-700">
               Atenção: são {sorted.length} lançamentos e o maior modelo do formulário comporta 90. Divida em mais de uma solicitação.
             </p>
+          )}
+
+          {historico.length > 0 && (
+            <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
+              <h2 className="font-display text-lg font-bold">Histórico de gerações</h2>
+              <p className="mt-1 text-xs text-slate-500">Planilhas e relatórios já gerados ficam arquivados aqui.</p>
+              <ul className="mt-3 divide-y divide-slate-100">
+                {historico.map((item) => (
+                  <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+                    <div>
+                      <p className="text-sm font-medium text-slate-800">{TIPO_LABEL[item.tipo] || item.tipo}</p>
+                      <p className="text-xs text-slate-500">
+                        {new Date(item.criadoEm).toLocaleString("pt-BR")} · {formatValor(item.totalGeral)}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1">
+                      <a href={`/.netlify/functions/historico?id=${encodeURIComponent(item.id)}&file=xlsx`}
+                        className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">Excel</a>
+                      {item.temPdf && (
+                        <a href={`/.netlify/functions/historico?id=${encodeURIComponent(item.id)}&file=pdf`}
+                          className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">PDF</a>
+                      )}
+                      <button onClick={() => reabrirHistorico(item)}
+                        className="rounded-md border border-amber-400 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100">Reabrir</button>
+                      <button onClick={() => excluirHistorico(item)} title="Excluir"
+                        className="rounded p-1.5 text-red-600 hover:bg-red-100"><TrashIcon size={14} /></button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </main>
       )}
