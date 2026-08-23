@@ -308,28 +308,54 @@ function App() {
     })();
   }, [carregarHistorico]);
 
+  // Salva a tabela sempre que muda, mas nunca com duas gravações em voo ao
+  // mesmo tempo: durante o envio em lote, cada arquivo processado dispara uma
+  // mudança em "records", e se a gravação anterior ainda não tivesse voltado
+  // do servidor, as duas usavam o mesmo etag antigo — a segunda era recusada
+  // como "conflito" e o lançamento sumia da tabela (o comprovante ficava
+  // salvo, mas nunca entrava na lista). Aqui, uma gravação em andamento só
+  // marca a próxima como pendente; ela sempre usa o estado mais recente.
+  const recordsRef = useRef(records);
+  recordsRef.current = records;
+  const recordsEtagRef = useRef(recordsEtag);
+  recordsEtagRef.current = recordsEtag;
+  const salvandoRef = useRef(false);
+  const pendenteRef = useRef(false);
+
+  const salvarRecords = useCallback(async () => {
+    if (salvandoRef.current) { pendenteRef.current = true; return; }
+    salvandoRef.current = true;
+    try {
+      do {
+        pendenteRef.current = false;
+        try {
+          const res = await fetch("/.netlify/functions/records", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ records: recordsRef.current, etag: recordsEtagRef.current }),
+          });
+          if (res.status === 409) {
+            showToast("Outra pessoa salvou alterações nesta tabela ao mesmo tempo. Recarregando os dados mais recentes — refaça sua última edição se precisar.", true);
+            const fresh = await apiGet("records");
+            setRecords(fresh.records || []);
+            setRecordsEtag(fresh.etag ?? null);
+            pendenteRef.current = false;
+          } else {
+            const data = await parseJsonResponse(res);
+            recordsEtagRef.current = data.etag ?? null;
+            setRecordsEtag(data.etag ?? null);
+          }
+        } catch (e) {
+          showToast(`Falha ao salvar despesas: ${e.message}`, true);
+        }
+      } while (pendenteRef.current);
+    } finally { salvandoRef.current = false; }
+  }, []);
+
   useEffect(() => {
     if (!loaded) return;
-    (async () => {
-      try {
-        const res = await fetch("/.netlify/functions/records", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ records, etag: recordsEtag }),
-        });
-        if (res.status === 409) {
-          showToast("Outra pessoa salvou alterações nesta tabela ao mesmo tempo. Recarregando os dados mais recentes — refaça sua última edição se precisar.", true);
-          const fresh = await apiGet("records");
-          setRecords(fresh.records || []);
-          setRecordsEtag(fresh.etag ?? null);
-          return;
-        }
-        const data = await parseJsonResponse(res);
-        setRecordsEtag(data.etag ?? null);
-      } catch (e) {
-        showToast(`Falha ao salvar despesas: ${e.message}`, true);
-      }
-    })();
-  }, [records, loaded]);
+    pendenteRef.current = true;
+    salvarRecords();
+  }, [records, loaded, salvarRecords]);
 
   const showToast = (msg, isError) => {
     setToast({ msg, isError });
