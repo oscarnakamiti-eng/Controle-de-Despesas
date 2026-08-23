@@ -23,10 +23,10 @@ const FORMS = {
     rateio: { first: 21, max: 10, cols: { centroCusto: "A", nCentroCusto: "B", projeto: "E", nProjeto: "G", fase: "H", percentual: "J" } },
     itemCols: { obs: "B", valor: "K" },   // despesas PREVISTAS: histórico + valor
     tiers: [
-      { n: 9,  file: "tpl_solicitacao_adiantamento_9.xlsx",  first: 34 },
-      { n: 20, file: "tpl_solicitacao_adiantamento_20.xlsx", first: 34 },
-      { n: 40, file: "tpl_solicitacao_adiantamento_40.xlsx", first: 34 },
-      { n: 60, file: "tpl_solicitacao_adiantamento_60.xlsx", first: 34 },
+      { n: 9,  file: "tpl_solicitacao_adiantamento_9.xlsx",  first: 34, assinaturaRow: 54 },
+      { n: 20, file: "tpl_solicitacao_adiantamento_20.xlsx", first: 34, assinaturaRow: 65 },
+      { n: 40, file: "tpl_solicitacao_adiantamento_40.xlsx", first: 34, assinaturaRow: 85 },
+      { n: 60, file: "tpl_solicitacao_adiantamento_60.xlsx", first: 34, assinaturaRow: 105 },
     ],
   },
   "prestacao-contas": {
@@ -35,11 +35,11 @@ const FORMS = {
     rateio: { first: 21, max: 6, cols: { centroCusto: "A", nCentroCusto: "B", projeto: "D", nProjeto: "G", fase: "H", percentual: "J" } },
     itemCols: { data: "B", tipo: "C", obs: "F", valor: "K" },
     tiers: [
-      { n: 22, file: "tpl_prestacao_contas_22.xlsx", first: 30, adiant: 56 },
-      { n: 30, file: "tpl_prestacao_contas_30.xlsx", first: 30, adiant: 64 },
-      { n: 40, file: "tpl_prestacao_contas_40.xlsx", first: 30, adiant: 74 },
-      { n: 60, file: "tpl_prestacao_contas_60.xlsx", first: 30, adiant: 94 },
-      { n: 90, file: "tpl_prestacao_contas_90.xlsx", first: 30, adiant: 124 },
+      { n: 22, file: "tpl_prestacao_contas_22.xlsx", first: 30, adiant: 56, assinaturaRow: 67 },
+      { n: 30, file: "tpl_prestacao_contas_30.xlsx", first: 30, adiant: 64, assinaturaRow: 75 },
+      { n: 40, file: "tpl_prestacao_contas_40.xlsx", first: 30, adiant: 74, assinaturaRow: 85 },
+      { n: 60, file: "tpl_prestacao_contas_60.xlsx", first: 30, adiant: 94, assinaturaRow: 105 },
+      { n: 90, file: "tpl_prestacao_contas_90.xlsx", first: 30, adiant: 124, assinaturaRow: 135 },
     ],
   },
   "reembolso": {
@@ -48,15 +48,20 @@ const FORMS = {
     rateio: { first: 20, max: 6, cols: { centroCusto: "A", nCentroCusto: "B", projeto: "D", nProjeto: "G", fase: "H", percentual: "J" } },
     itemCols: { data: "B", tipo: "C", obs: "F", valor: "K" },
     tiers: [
-      { n: 10, file: "tpl_reembolso_10.xlsx", first: 29 },
-      { n: 22, file: "tpl_reembolso_22.xlsx", first: 29 },
-      { n: 30, file: "tpl_reembolso_30.xlsx", first: 29 },
-      { n: 40, file: "tpl_reembolso_40.xlsx", first: 29 },
-      { n: 60, file: "tpl_reembolso_60.xlsx", first: 29 },
-      { n: 90, file: "tpl_reembolso_90.xlsx", first: 29 },
+      { n: 10, file: "tpl_reembolso_10.xlsx", first: 29, assinaturaRow: 51 },
+      { n: 22, file: "tpl_reembolso_22.xlsx", first: 29, assinaturaRow: 63 },
+      { n: 30, file: "tpl_reembolso_30.xlsx", first: 29, assinaturaRow: 71 },
+      { n: 40, file: "tpl_reembolso_40.xlsx", first: 29, assinaturaRow: 81 },
+      { n: 60, file: "tpl_reembolso_60.xlsx", first: 29, assinaturaRow: 101 },
+      { n: 90, file: "tpl_reembolso_90.xlsx", first: 29, assinaturaRow: 131 },
     ],
   },
 };
+
+// Linha (1-indexado) da caixa "SOLICITANTE" na área de assinaturas: sempre
+// 2 linhas abaixo do cabeçalho "ASSINATURAS*" nesses modelos (cabeçalho,
+// espaçador, caixa de assinatura com "DATA:" + TODAY()). Confirmado nos 15
+// modelos ao inspecionar o XML de cada um.
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -81,6 +86,78 @@ function serialDeData(str) {
   const dt = Date.UTC(Number(y), Number(mo) - 1, Number(d));
   if (isNaN(dt)) return null;
   return Math.round((dt - Date.UTC(1899, 11, 30)) / 86400000);
+}
+
+const EMU_POR_PONTO = 12700;
+
+// Cola a imagem da assinatura na caixa "SOLICITANTE" da área de assinaturas,
+// via XML puro (media + drawing + relacionamentos), na mesma linha do
+// preenchimento por marcadores — sem nenhuma biblioteca de Excel.
+function injetarAssinatura(arquivos, nomeSheet, xml, linha, assinatura) {
+  const linhaZeroIdx = linha - 1;
+  const alturaMatch = xml.match(new RegExp(`<row r="${linha}"[^>]*\\bht="([\\d.]+)"`));
+  const alturaLinhaEmu = (alturaMatch ? parseFloat(alturaMatch[1]) : 20) * EMU_POR_PONTO;
+
+  const alturaImgEmu = Math.round(alturaLinhaEmu * 0.75);
+  const larguraImgEmu = Math.round(alturaImgEmu * (assinatura.width / assinatura.height));
+  const offsetTopoEmu = Math.round((alturaLinhaEmu - alturaImgEmu) / 2);
+  const offsetEsquerdaEmu = 36000; // ~1mm de margem
+
+  const ehPng = assinatura.mediaType === "image/png";
+  const extensao = ehPng ? "png" : "jpeg";
+  const nomeMidia = `xl/media/assinatura.${extensao}`;
+  const nomeDrawing = "xl/drawings/drawing1.xml";
+  const nomeDrawingRels = "xl/drawings/_rels/drawing1.xml.rels";
+  const nomeSheetRels = nomeSheet.replace("xl/worksheets/", "xl/worksheets/_rels/") + ".rels";
+
+  arquivos[nomeMidia] = assinatura.bytes;
+
+  const drawingXml =
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" ' +
+    'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' +
+    'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+    "<xdr:oneCellAnchor>" +
+    `<xdr:from><xdr:col>0</xdr:col><xdr:colOff>${offsetEsquerdaEmu}</xdr:colOff>` +
+    `<xdr:row>${linhaZeroIdx}</xdr:row><xdr:rowOff>${offsetTopoEmu}</xdr:rowOff></xdr:from>` +
+    `<xdr:ext cx="${larguraImgEmu}" cy="${alturaImgEmu}"/>` +
+    "<xdr:pic>" +
+    '<xdr:nvPicPr><xdr:cNvPr id="1" name="Assinatura"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>' +
+    '<xdr:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>' +
+    `<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${larguraImgEmu}" cy="${alturaImgEmu}"/></a:xfrm>` +
+    '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>' +
+    "</xdr:pic><xdr:clientData/></xdr:oneCellAnchor></xdr:wsDr>";
+  arquivos[nomeDrawing] = new TextEncoder().encode(drawingXml);
+
+  arquivos[nomeDrawingRels] = new TextEncoder().encode(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/assinatura.${extensao}"/>` +
+    "</Relationships>"
+  );
+
+  arquivos[nomeSheetRels] = new TextEncoder().encode(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    '<Relationship Id="rIdAssinatura" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/>' +
+    "</Relationships>"
+  );
+
+  let tipos = new TextDecoder("utf-8").decode(arquivos["[Content_Types].xml"]);
+  let extras = "";
+  if (!new RegExp(`Extension="${extensao}"`).test(tipos)) {
+    extras += `<Default Extension="${extensao}" ContentType="image/${extensao}"/>`;
+  }
+  extras += '<Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>';
+  tipos = tipos.replace("</Types>", `${extras}</Types>`);
+  arquivos["[Content_Types].xml"] = new TextEncoder().encode(tipos);
+
+  let sheetXml = xml.replace(
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+  );
+  sheetXml = sheetXml.replace("</worksheet>", '<drawing r:id="rIdAssinatura"/></worksheet>');
+  return sheetXml;
 }
 
 export default async (req) => {
@@ -172,6 +249,22 @@ export default async (req) => {
     xml = xml.replace(/@@([A-Z]+\d+)@@/g, (_, ref) =>
       Object.prototype.hasOwnProperty.call(texto, ref) ? escaparXml(texto[ref]) : ""
     );
+
+    // ---- cola a assinatura salva na caixa do solicitante, se houver ----
+    if (tier.assinaturaRow) {
+      try {
+        const store = getStore("expense-tracker");
+        const assinaturaBuf = await store.get("assinatura", { type: "arrayBuffer" });
+        if (assinaturaBuf) {
+          const meta = (await store.get("assinatura-meta", { type: "json" })) || {};
+          if (meta.width && meta.height) {
+            xml = injetarAssinatura(arquivos, nomeSheet, xml, tier.assinaturaRow, {
+              bytes: new Uint8Array(assinaturaBuf), mediaType: meta.mediaType, width: meta.width, height: meta.height,
+            });
+          }
+        }
+      } catch { /* sem assinatura configurada ou falha ao buscá-la — segue sem ela */ }
+    }
 
     arquivos[nomeSheet] = new TextEncoder().encode(xml);
     const saida = zipSync(arquivos, { level: 6 });

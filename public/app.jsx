@@ -104,6 +104,25 @@ async function comprimirImagem(file, maxDim = 2000, quality = 0.85) {
     return null;
   }
 }
+// Prepara a imagem da assinatura: reduz o tamanho e converte para JPEG com
+// fundo branco (assinaturas costumam ser PNG com fundo transparente, que sem
+// isso ficariam com fundo preto ao virar JPEG). Devolve também as dimensões,
+// necessárias pra posicionar a imagem na planilha sem distorcer.
+async function comprimirAssinatura(file, maxDim = 500, quality = 0.92) {
+  const bitmap = await createImageBitmap(file);
+  const escala = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+  const w = Math.round(bitmap.width * escala);
+  const h = Math.round(bitmap.height * escala);
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close?.();
+  const base64 = canvas.toDataURL("image/jpeg", quality).split(",")[1];
+  return { base64, mediaType: "image/jpeg", width: w, height: h };
+}
 function makeId() { return `rec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; }
 function fileUrl(id) { return `/.netlify/functions/files?id=${encodeURIComponent(id)}`; }
 function previewUrl(id, page) { return `${fileUrl(id)}&preview=${page}`; }
@@ -240,6 +259,9 @@ function App() {
   const [recordsEtag, setRecordsEtag] = useState(null);
   const [profile, setProfile] = useState({});
   const [presets, setPresets] = useState([]);
+  const [assinaturaVersao, setAssinaturaVersao] = useState(0);
+  const [temAssinatura, setTemAssinatura] = useState(null); // null = ainda não sabe
+  const [enviandoAssinatura, setEnviandoAssinatura] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(null);
   const [queue, setQueue] = useState([]);
@@ -252,6 +274,7 @@ function App() {
   const [toast, setToast] = useState(null);
   const [historico, setHistorico] = useState([]);
   const fileInputRef = useRef(null);
+  const assinaturaInputRef = useRef(null);
   const dropRef = useRef(null);
 
   // formulário de geração
@@ -445,6 +468,30 @@ function App() {
   const savePresets = async () => {
     try { await apiPost("rateio", { presets }); showToast("Presets de rateio salvos."); }
     catch (e) { showToast(`Erro ao salvar: ${e.message}`, true); }
+  };
+
+  const enviarAssinatura = async (file) => {
+    setEnviandoAssinatura(true);
+    try {
+      const { base64, mediaType, width, height } = await comprimirAssinatura(file);
+      await apiPost("assinatura", { base64, mediaType, width, height });
+      setTemAssinatura(true);
+      setAssinaturaVersao((v) => v + 1);
+      showToast("Assinatura salva.");
+    } catch (e) {
+      showToast(`Não foi possível salvar a assinatura: ${e.message}`, true);
+    } finally { setEnviandoAssinatura(false); }
+  };
+
+  const removerAssinatura = async () => {
+    if (!window.confirm("Remover a assinatura salva?")) return;
+    try {
+      await fetch("/.netlify/functions/assinatura", { method: "DELETE" });
+      setTemAssinatura(false);
+      showToast("Assinatura removida.");
+    } catch (e) {
+      showToast(`Erro ao remover: ${e.message}`, true);
+    }
   };
 
   const baixarBlob = (blob, nome) => {
@@ -977,6 +1024,37 @@ function App() {
             <button onClick={saveProfile} className="mt-4 inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
               <CheckIcon size={16} /> Salvar dados do solicitante
             </button>
+          </div>
+
+          <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
+            <h2 className="font-display text-lg font-bold">Assinatura</h2>
+            <p className="mt-1 text-xs text-slate-500">Usada para preencher automaticamente o campo de assinatura nas planilhas oficiais.</p>
+            <div className="mt-3 flex flex-wrap items-center gap-4">
+              <div className="flex h-20 w-48 items-center justify-center rounded border border-dashed border-slate-300 bg-stone-50 p-2">
+                {temAssinatura === false ? (
+                  <span className="text-center text-xs text-slate-400">Nenhuma assinatura cadastrada</span>
+                ) : (
+                  <img
+                    src={`/.netlify/functions/assinatura?v=${assinaturaVersao}`}
+                    alt="Assinatura"
+                    className="max-h-full max-w-full object-contain"
+                    onLoad={() => setTemAssinatura(true)}
+                    onError={() => setTemAssinatura(false)}
+                  />
+                )}
+              </div>
+              <div className="flex flex-col items-start gap-1.5">
+                <button onClick={() => assinaturaInputRef.current?.click()} disabled={enviandoAssinatura}
+                  className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                  <UploadIcon size={15} /> {enviandoAssinatura ? "Enviando…" : (temAssinatura ? "Trocar assinatura" : "Selecionar assinatura")}
+                </button>
+                {temAssinatura && (
+                  <button onClick={removerAssinatura} className="text-xs font-medium text-red-600 hover:text-red-800">Remover assinatura</button>
+                )}
+                <input ref={assinaturaInputRef} type="file" accept="image/*" className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) enviarAssinatura(f); e.target.value = ""; }} />
+              </div>
+            </div>
           </div>
 
           <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
