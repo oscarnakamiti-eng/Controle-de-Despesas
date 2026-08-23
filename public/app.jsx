@@ -10,12 +10,6 @@ const TIPO_STYLE = {
   "Materiais e Serviços": "bg-slate-200 text-slate-800 border-slate-400",
 };
 
-const TIPO_LABEL = {
-  "solicitacao-adiantamento": "Solicitação de adiantamento",
-  "prestacao-contas": "Prestação de contas",
-  "reembolso": "Solicitação de reembolso",
-};
-
 function Icon({ children, size = 16, className = "", ...props }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -103,6 +97,33 @@ async function comprimirImagem(file, maxDim = 2000, quality = 0.85) {
   } catch {
     return null;
   }
+}
+// Deixa o usuário escolher a pasta/nome do arquivo ao baixar, quando o
+// navegador suporta (Chrome/Edge); em navegadores sem suporte (Firefox,
+// Safari) ou se o diálogo falhar por outro motivo, cai no download comum
+// (pasta de Downloads padrão). Cancelar o diálogo não é tratado como erro.
+async function salvarArquivoComo(blob, nomeSugerido) {
+  if (window.showSaveFilePicker) {
+    try {
+      const ext = "." + (nomeSugerido.split(".").pop() || "bin");
+      const handle = await window.showSaveFilePicker({
+        suggestedName: nomeSugerido,
+        types: [{ description: "Arquivo", accept: { [blob.type || "application/octet-stream"]: [ext] } }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return;
+    } catch (e) {
+      if (e && e.name === "AbortError") return; // usuário cancelou o diálogo
+      // qualquer outro erro: segue para o download comum abaixo
+    }
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = nomeSugerido;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 // Prepara a imagem da assinatura: reduz o tamanho e converte para JPEG com
 // fundo branco (assinaturas costumam ser PNG com fundo transparente, que sem
@@ -254,6 +275,74 @@ function EditRow({ draft, setDraft, onSave, onCancel }) {
   );
 }
 
+// Achata a estrutura agrupada (centro de custo -> projetos) numa lista plana
+// de linhas, uma por projeto, repetindo os dados do centro de custo — é o
+// formato que a planilha oficial espera (uma linha por combinação).
+function flattenRateio(grupos) {
+  const linhas = [];
+  for (const g of grupos || []) {
+    const projetos = g.projetos && g.projetos.length > 0 ? g.projetos : [{ projeto: "", nProjeto: "", fase: "17", percentual: "" }];
+    for (const p of projetos) {
+      linhas.push({
+        centroCusto: g.centroCusto || "", nCentroCusto: g.nCentroCusto || "",
+        projeto: p.projeto || "", nProjeto: p.nProjeto || "", fase: p.fase || "", percentual: p.percentual || "",
+      });
+    }
+  }
+  return linhas;
+}
+
+// Editor de rateio agrupado por centro de custo, com projetos aninhados e
+// conferência de que a soma dos percentuais de cada centro de custo dá 100%.
+function RateioEditor({ grupos, setGrupos }) {
+  const addGrupo = () => setGrupos([...grupos, { centroCusto: "", nCentroCusto: "", projetos: [{ projeto: "", nProjeto: "", fase: "17", percentual: "" }] }]);
+  const removeGrupo = (gi) => setGrupos(grupos.filter((_, i) => i !== gi));
+  const updateGrupo = (gi, campo, valor) => setGrupos(grupos.map((g, i) => (i === gi ? { ...g, [campo]: valor } : g)));
+  const addProjeto = (gi) => setGrupos(grupos.map((g, i) => (i === gi ? { ...g, projetos: [...g.projetos, { projeto: "", nProjeto: "", fase: "17", percentual: "" }] } : g)));
+  const removeProjeto = (gi, pi) => setGrupos(grupos.map((g, i) => (i === gi ? { ...g, projetos: g.projetos.filter((_, j) => j !== pi) } : g)));
+  const updateProjeto = (gi, pi, campo, valor) => setGrupos(grupos.map((g, i) => (i === gi ? { ...g, projetos: g.projetos.map((p, j) => (j === pi ? { ...p, [campo]: valor } : p)) } : g)));
+
+  return (
+    <div className="space-y-3">
+      {grupos.length === 0 && <p className="text-xs text-slate-400">Nenhum centro de custo. Adicione abaixo.</p>}
+      {grupos.map((g, gi) => {
+        const projetos = g.projetos || [];
+        const soma = projetos.reduce((s, p) => s + parseValorInput(p.percentual), 0);
+        const somaOk = projetos.length === 0 || Math.abs(soma - 100) < 0.01;
+        return (
+          <div key={gi} className="rounded-md border border-slate-200 p-2.5">
+            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-6">
+              <input value={g.centroCusto} onChange={(e) => updateGrupo(gi, "centroCusto", e.target.value)} placeholder="Centro de custo" className="col-span-2 rounded border border-slate-300 px-2 py-1 text-xs sm:col-span-4" />
+              <input value={g.nCentroCusto} onChange={(e) => updateGrupo(gi, "nCentroCusto", e.target.value)} placeholder="Nº CC" className="rounded border border-slate-300 px-2 py-1 text-xs" />
+              <button onClick={() => removeGrupo(gi)} title="Excluir centro de custo" className="flex items-center justify-center rounded p-1 text-red-600 hover:bg-red-100"><TrashIcon size={13} /></button>
+            </div>
+            <div className="mt-2 space-y-1.5 border-l-2 border-slate-100 pl-2">
+              {projetos.map((p, pi) => (
+                <div key={pi} className="grid grid-cols-2 gap-1.5 sm:grid-cols-5">
+                  <input value={p.projeto} onChange={(e) => updateProjeto(gi, pi, "projeto", e.target.value)} placeholder="Projeto" className="col-span-2 rounded border border-slate-300 px-2 py-1 text-xs" />
+                  <input value={p.nProjeto} onChange={(e) => updateProjeto(gi, pi, "nProjeto", e.target.value)} placeholder="Nº projeto" className="rounded border border-slate-300 px-2 py-1 text-xs" />
+                  <input value={p.fase} onChange={(e) => updateProjeto(gi, pi, "fase", e.target.value)} placeholder="Fase" className="rounded border border-slate-300 px-2 py-1 text-xs" />
+                  <div className="flex gap-1">
+                    <input value={p.percentual} onChange={(e) => updateProjeto(gi, pi, "percentual", e.target.value)} placeholder="%" className="w-full rounded border border-slate-300 px-2 py-1 text-xs" />
+                    <button onClick={() => removeProjeto(gi, pi)} title="Excluir projeto" className="rounded p-1 text-red-600 hover:bg-red-100"><TrashIcon size={13} /></button>
+                  </div>
+                </div>
+              ))}
+              <button onClick={() => addProjeto(gi)} className="text-xs font-medium text-amber-700 hover:text-amber-900">+ projeto</button>
+            </div>
+            {projetos.length > 0 && (
+              <div className={`mt-1.5 text-right text-xs font-medium ${somaOk ? "text-emerald-600" : "text-red-600"}`}>
+                Soma dos projetos: {soma.toFixed(2).replace(".", ",")}% {somaOk ? "✓" : "— deve somar 100%"}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <button onClick={addGrupo} className="text-xs font-medium text-amber-700 hover:text-amber-900">+ centro de custo</button>
+    </div>
+  );
+}
+
 function App() {
   const [view, setView] = useState("tabela"); // tabela | relatorio | perfil | gerar
   const [records, setRecords] = useState([]);
@@ -269,11 +358,10 @@ function App() {
   const [processing, setProcessing] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
-  const [addingNew, setAddingNew] = useState(false);
-  const [newDraft, setNewDraft] = useState(null);
+  const [filaAvisoLimite, setFilaAvisoLimite] = useState([]); // ids de records aguardando confirmação
+  const [avisoLimite, setAvisoLimite] = useState(null); // { id, pessoas, nomes }
   const [previewId, setPreviewId] = useState(null);
   const [toast, setToast] = useState(null);
-  const [historico, setHistorico] = useState([]);
   const [selecionados, setSelecionados] = useState(() => new Set());
   const fileInputRef = useRef(null);
   const assinaturaInputRef = useRef(null);
@@ -287,28 +375,36 @@ function App() {
   const [previsoes, setPrevisoes] = useState([]);
   const [gerando, setGerando] = useState(false);
 
-  const carregarHistorico = useCallback(async () => {
-    try {
-      const h = await apiGet("historico");
-      setHistorico(h.items || []);
-    } catch { /* histórico é auxiliar — falha aqui não bloqueia o app */ }
-  }, []);
-
   useEffect(() => {
     (async () => {
       try {
-        const [r, p, rp] = await Promise.all([apiGet("records"), apiGet("profile"), apiGet("rateio")]);
+        const [r, p, rp, rc] = await Promise.all([apiGet("records"), apiGet("profile"), apiGet("rateio"), apiGet("rascunho")]);
         setRecords(r.records || []);
         setRecordsEtag(r.etag ?? null);
         setProfile(p.profile || {});
         setPresets(rp.presets || []);
-        setRateio(rp.presets || []);
+        const rascunho = rc.rascunho || {};
+        setMotivo(rascunho.motivo || "");
+        setValorAdiantamento(rascunho.valorAdiantamento || "");
+        setRateio(Array.isArray(rascunho.rateio) && rascunho.rateio.length > 0 ? rascunho.rateio : (rp.presets || []));
+        setPrevisoes(Array.isArray(rascunho.previsoes) ? rascunho.previsoes : []);
+        if (rascunho.fluxo) setFluxo(rascunho.fluxo);
       } catch (e) {
         setLoadError(String(e.message || e));
       } finally { setLoaded(true); }
-      carregarHistorico();
     })();
-  }, [carregarHistorico]);
+  }, []);
+
+  // Salva o formulário de geração em preenchimento (rascunho), pra não se
+  // perder se a página fechar antes de gerar. Não há histórico de
+  // relatórios já gerados — a empresa controla isso em outra ferramenta.
+  useEffect(() => {
+    if (!loaded) return;
+    const handle = setTimeout(() => {
+      apiPost("rascunho", { rascunho: { motivo, valorAdiantamento, rateio, previsoes, fluxo } }).catch(() => {});
+    }, 600);
+    return () => clearTimeout(handle);
+  }, [motivo, valorAdiantamento, rateio, previsoes, fluxo, loaded]);
 
   // Salva a tabela sempre que muda, mas nunca com duas gravações em voo ao
   // mesmo tempo: durante o envio em lote, cada arquivo processado dispara uma
@@ -377,6 +473,27 @@ function App() {
     setTimeout(() => setToast(null), 4000);
   };
 
+  // Mostra os avisos de refeição acima do limite um de cada vez (útil em
+  // envios de vários comprovantes de uma vez).
+  useEffect(() => {
+    if (!avisoLimite && filaAvisoLimite.length > 0) {
+      setAvisoLimite({ id: filaAvisoLimite[0], pessoas: "", nomes: "" });
+      setFilaAvisoLimite((prev) => prev.slice(1));
+    }
+  }, [filaAvisoLimite, avisoLimite]);
+
+  const confirmarAvisoLimite = (incluirPessoas) => {
+    if (incluirPessoas && avisoLimite.nomes.trim()) {
+      const info = avisoLimite.pessoas
+        ? `Refeição para ${avisoLimite.pessoas} pessoa(s): ${avisoLimite.nomes.trim()}`
+        : `Também para: ${avisoLimite.nomes.trim()}`;
+      setRecords((prev) => prev.map((r) =>
+        r.id === avisoLimite.id ? { ...r, obs: r.obs ? `${r.obs} — ${info}` : info } : r
+      ));
+    }
+    setAvisoLimite(null);
+  };
+
   const processFiles = useCallback(async (fileList) => {
     const files = Array.from(fileList || []);
     if (files.length === 0) return;
@@ -428,6 +545,9 @@ function App() {
           valor, fileName: file.name, mediaType, hasFile: !!fileStored, pages,
           status: needsReview ? "revisar" : "ok",
         }]);
+        if ((tipo === "Almoço" || tipo === "Jantar") && valor > 35) {
+          setFilaAvisoLimite((prev) => [...prev, recId]);
+        }
         if (convErro) {
           setQueue((prev) => prev.map((q) => (q.qid === qid ? { ...q, status: "aviso", error: `lido, mas o PDF não converteu: ${convErro}` } : q)));
         } else {
@@ -479,16 +599,6 @@ function App() {
     await Promise.all(alvos.filter((r) => r.hasFile).map((r) =>
       fetch(`${fileUrl(r.id)}&pages=${Number(r.pages) || 0}`, { method: "DELETE" }).catch(() => {})
     ));
-  };
-  const saveAddNew = () => {
-    const d = parseDatePtBr(newDraft.data);
-    setRecords((prev) => [...prev, {
-      id: makeId(), data: d ? formatDatePtBr(d) : formatDatePtBr(new Date()),
-      tipo: TIPOS.includes(newDraft.tipo) ? newDraft.tipo : TIPOS[0], obs: newDraft.obs,
-      valor: parseValorInput(newDraft.valor), fileName: null, mediaType: null, hasFile: false,
-      status: d ? "ok" : "revisar",
-    }]);
-    setAddingNew(false); setNewDraft(null);
   };
 
   const [convertendoId, setConvertendoId] = useState(null);
@@ -554,12 +664,49 @@ function App() {
     }
   };
 
-  const baixarBlob = (blob, nome) => {
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = nome;
-    a.click();
-    URL.revokeObjectURL(a.href);
+  const nomeArquivoComprovante = (r, idx) => {
+    const ext = r.mediaType === "image/png" ? "png" : "jpg";
+    const base = `${String(idx + 1).padStart(2, "0")}-${(r.data || "").replace(/\//g, "-")}-${r.tipo || ""}`.replace(/[^\w.-]+/g, "_");
+    return `${base}.${ext}`;
+  };
+
+  const baixarComprovanteOriginal = async (rec) => {
+    try {
+      const res = await fetch(fileUrl(rec.id));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await salvarArquivoComo(await res.blob(), rec.fileName || "comprovante");
+    } catch (e) {
+      showToast(`Erro ao baixar comprovante: ${e.message}`, true);
+    }
+  };
+
+  const baixarComprovante = async (r, idx) => {
+    if (!r.src) return;
+    try {
+      const res = await fetch(r.src);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await salvarArquivoComo(await res.blob(), nomeArquivoComprovante(r, idx));
+    } catch (e) {
+      showToast(`Erro ao baixar comprovante: ${e.message}`, true);
+    }
+  };
+
+  const baixarTodosComprovantes = async () => {
+    if (reportPages.length === 0) return;
+    try {
+      const arquivos = {};
+      for (let i = 0; i < reportPages.length; i++) {
+        const r = reportPages[i];
+        if (!r.src) continue;
+        const res = await fetch(r.src);
+        if (!res.ok) continue;
+        arquivos[nomeArquivoComprovante(r, i)] = new Uint8Array(await res.arrayBuffer());
+      }
+      const zipBytes = window.fflate.zipSync(arquivos, { level: 6 });
+      await salvarArquivoComo(new Blob([zipBytes], { type: "application/zip" }), "comprovantes.zip");
+    } catch (e) {
+      showToast(`Erro ao baixar comprovantes: ${e.message}`, true);
+    }
   };
 
   const XLSX_NOMES = {
@@ -569,11 +716,15 @@ function App() {
   };
 
   // Gera a planilha oficial (e o relatório fotográfico em PDF, quando cabe),
-  // baixa os dois, arquiva ambos no histórico e zera a tabela/formulário
-  // pra deixar pronto pro próximo ciclo.
+  // deixa o usuário escolher onde salvar cada arquivo, e zera a tabela/
+  // formulário pra deixar pronto pro próximo ciclo. Nada fica arquivado no
+  // servidor — a empresa já controla os relatórios gerados em outra ferramenta.
   const baixarPlanilha = async (tipo) => {
+    if (tipo === "prestacao-contas" && parseValorInput(valorAdiantamento) <= 0) {
+      showToast("Informe o valor que foi adiantado — a prestação de contas é sempre referente a um adiantamento.", true);
+      return;
+    }
     setGerando(true);
-    const historyId = `hist-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const isAdiantamentoReq = tipo === "solicitacao-adiantamento";
     const registrosCompletos = isAdiantamentoReq ? [] : sorted.map(({ dateObj, ...resto }) => resto);
     const itensParaPlanilha = registrosCompletos.map((r) => ({ data: r.data, tipo: r.tipo, obs: r.obs, valor: r.valor }));
@@ -583,16 +734,16 @@ function App() {
       const res = await fetch("/.netlify/functions/generate-report", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          tipo, profile, motivo, rateio,
+          tipo, profile, motivo, rateio: flattenRateio(rateio),
           valorAdiantamento: parseValorInput(valorAdiantamento),
-          records: itensParaPlanilha, previsoes: itensPrevisoes, historyId,
+          records: itensParaPlanilha, previsoes: itensPrevisoes,
         }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || `HTTP ${res.status}`);
       }
-      baixarBlob(await res.blob(), XLSX_NOMES[tipo]);
+      await salvarArquivoComo(await res.blob(), XLSX_NOMES[tipo]);
 
       let temPdf = false;
       if (!isAdiantamentoReq && reportPages.length > 0) {
@@ -600,24 +751,12 @@ function App() {
           const resPdf = await fetch("/.netlify/functions/generate-photo-report", {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              historyId,
               pages: reportPages.map((r) => ({ id: r.id, page: r.page, mediaType: r.mediaType, data: r.data, tipo: r.tipo, valor: r.valor, obs: r.obs })),
             }),
           });
-          if (resPdf.ok) { baixarBlob(await resPdf.blob(), `relatorio-fotografico-${tipo}.pdf`); temPdf = true; }
+          if (resPdf.ok) { await salvarArquivoComo(await resPdf.blob(), `relatorio-fotografico-${tipo}.pdf`); temPdf = true; }
         } catch { /* o Excel já foi gerado; o relatório em PDF fica só pendente */ }
       }
-
-      const entradaHistorico = {
-        id: historyId, criadoEm: new Date().toISOString(), tipo, motivo,
-        valorAdiantamento: parseValorInput(valorAdiantamento), rateio,
-        records: registrosCompletos, previsoes: itensPrevisoes, totalGeral,
-        xlsxNome: XLSX_NOMES[tipo], temPdf,
-      };
-      await apiPost("historico", { ...entradaHistorico, historyId }).catch(() => {});
-      // Atualiza a lista na hora (o índice nos Blobs pode levar alguns
-      // segundos pra refletir a gravação numa releitura).
-      setHistorico((prev) => [entradaHistorico, ...prev]);
 
       if (isAdiantamentoReq) setPrevisoes([]); else setRecords([]);
       setMotivo(""); setRateio([]);
@@ -626,46 +765,13 @@ function App() {
       const precisaPdf = !isAdiantamentoReq && reportPages.length > 0;
       showToast(
         precisaPdf && !temPdf
-          ? "Planilha gerada, mas o relatório em PDF falhou — tente de novo pela aba Histórico."
-          : "Gerado e salvo no histórico. Despesas zeradas para o próximo ciclo.",
+          ? "Planilha gerada, mas o relatório em PDF falhou — tente de novo pela aba Relatório fotográfico."
+          : "Planilha gerada. Despesas zeradas para o próximo ciclo.",
         precisaPdf && !temPdf
       );
     } catch (e) {
       showToast(`Erro ao gerar planilha: ${e.message}`, true);
     } finally { setGerando(false); }
-  };
-
-  const usarValoresDoHistorico = () => {
-    if (historico.length === 0) { showToast("Nenhum histórico salvo ainda.", true); return; }
-    const ultimo = historico[0];
-    setMotivo(ultimo.motivo || "");
-    setRateio(ultimo.rateio || []);
-    setValorAdiantamento(ultimo.valorAdiantamento ? formatValor(ultimo.valorAdiantamento) : "");
-    showToast("Motivo, valor e rateio da última geração recuperados.");
-  };
-
-  const reabrirHistorico = (item) => {
-    if (!window.confirm("Isso substitui os dados atuais (tabela de despesas ou previsões, motivo e rateio) pelos deste histórico. Continuar?")) return;
-    setMotivo(item.motivo || "");
-    setRateio(item.rateio || []);
-    setValorAdiantamento(item.valorAdiantamento ? formatValor(item.valorAdiantamento) : "");
-    if (item.tipo === "solicitacao-adiantamento") {
-      setPrevisoes((item.previsoes || []).map((p) => ({ obs: p.obs, valor: formatValor(p.valor) })));
-    } else {
-      setRecords(item.records || []);
-    }
-    setView("gerar");
-    showToast("Dados do histórico carregados para edição.");
-  };
-
-  const excluirHistorico = async (item) => {
-    if (!window.confirm("Excluir este item do histórico e os arquivos arquivados? Esta ação não pode ser desfeita.")) return;
-    try {
-      await fetch(`/.netlify/functions/historico?id=${encodeURIComponent(item.id)}`, { method: "DELETE" });
-      setHistorico((prev) => prev.filter((x) => x.id !== item.id));
-    } catch (e) {
-      showToast(`Erro ao excluir: ${e.message}`, true);
-    }
   };
 
   // --- dados derivados ---
@@ -798,11 +904,7 @@ function App() {
             </div>
           )}
 
-          <div className="no-print mt-4 flex flex-wrap items-center justify-between gap-3">
-            <button onClick={() => { setAddingNew(true); setNewDraft({ data: formatDatePtBr(new Date()), tipo: TIPOS[0], obs: "", valor: "0,00" }); }}
-              className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
-              <PlusIcon size={15} /> Adicionar lançamento
-            </button>
+          <div className="no-print mt-4 flex flex-wrap items-center justify-end gap-3">
             {reviewCount > 0 && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800">
                 <AlertIcon size={13} /> {reviewCount} lançamento(s) a revisar
@@ -852,8 +954,7 @@ function App() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {addingNew && newDraft && <EditRow draft={newDraft} setDraft={setNewDraft} onSave={saveAddNew} onCancel={() => { setAddingNew(false); setNewDraft(null); }} />}
-                {weeks.length === 0 && !addingNew && (
+                {weeks.length === 0 && (
                   <tr><td colSpan={6} className="px-3 py-10 text-center text-sm text-slate-400">
                     Nenhum lançamento ainda. Envie comprovantes acima ou adicione manualmente.
                   </td></tr>
@@ -950,33 +1051,10 @@ function App() {
                   className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500" />
               </label>
             </div>
-            {historico.length > 0 && (
-              <button onClick={usarValoresDoHistorico} type="button"
-                className="mt-1.5 text-xs font-medium text-amber-700 hover:text-amber-900">
-                Usar motivo, valor e rateio da última geração
-              </button>
-            )}
 
             <div className="mt-4">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Rateio</span>
-                <button onClick={() => setRateio([...rateio, { centroCusto: "", nCentroCusto: "", projeto: "", nProjeto: "", fase: "17", percentual: "" }])}
-                  className="text-xs font-medium text-amber-700 hover:text-amber-900">+ linha</button>
-              </div>
-              {rateio.length === 0 && <p className="text-xs text-slate-400">Nenhuma linha. Cadastre presets em "Cadastros" ou adicione aqui.</p>}
-              {rateio.map((r, i) => (
-                <div key={i} className="mb-1.5 grid grid-cols-2 gap-1.5 sm:grid-cols-7">
-                  <input value={r.centroCusto} onChange={(e) => setRateio(rateio.map((x, j) => j === i ? { ...x, centroCusto: e.target.value } : x))} placeholder="Centro de custo" className="col-span-2 rounded border border-slate-300 px-2 py-1 text-xs" />
-                  <input value={r.nCentroCusto} onChange={(e) => setRateio(rateio.map((x, j) => j === i ? { ...x, nCentroCusto: e.target.value } : x))} placeholder="Nº CC" className="rounded border border-slate-300 px-2 py-1 text-xs" />
-                  <input value={r.projeto} onChange={(e) => setRateio(rateio.map((x, j) => j === i ? { ...x, projeto: e.target.value } : x))} placeholder="Projeto" className="rounded border border-slate-300 px-2 py-1 text-xs" />
-                  <input value={r.nProjeto} onChange={(e) => setRateio(rateio.map((x, j) => j === i ? { ...x, nProjeto: e.target.value } : x))} placeholder="Nº projeto" className="rounded border border-slate-300 px-2 py-1 text-xs" />
-                  <input value={r.fase} onChange={(e) => setRateio(rateio.map((x, j) => j === i ? { ...x, fase: e.target.value } : x))} placeholder="Fase" className="rounded border border-slate-300 px-2 py-1 text-xs" />
-                  <div className="flex gap-1">
-                    <input value={r.percentual} onChange={(e) => setRateio(rateio.map((x, j) => j === i ? { ...x, percentual: e.target.value } : x))} placeholder="%" className="w-full rounded border border-slate-300 px-2 py-1 text-xs" />
-                    <button onClick={() => setRateio(rateio.filter((_, j) => j !== i))} className="rounded p-1 text-red-600 hover:bg-red-100"><TrashIcon size={13} /></button>
-                  </div>
-                </div>
-              ))}
+              <span className="mb-2 block text-xs font-medium uppercase tracking-wide text-slate-500">Rateio</span>
+              <RateioEditor grupos={rateio} setGrupos={setRateio} />
             </div>
           </div>
 
@@ -1013,12 +1091,15 @@ function App() {
                 <h3 className="font-display text-lg font-bold">Prestação de contas</h3>
                 <p className="mt-1 text-sm text-slate-600">Usa os {sorted.length} lançamento(s) da tabela de despesas (total {formatValor(totalGeral)}).</p>
                 <label className="mt-3 block max-w-xs">
-                  <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Valor que foi adiantado</span>
+                  <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Valor que foi adiantado *</span>
                   <input value={valorAdiantamento} onChange={(e) => setValorAdiantamento(e.target.value)} placeholder="0,00" inputMode="decimal"
                     className="w-full rounded border border-slate-300 px-2 py-1.5 text-right text-sm font-mono-num" />
                 </label>
+                {parseValorInput(valorAdiantamento) <= 0 && (
+                  <p className="mt-1 text-xs text-amber-700">Obrigatório — a prestação de contas é sempre referente a um adiantamento.</p>
+                )}
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <button onClick={() => baixarPlanilha("prestacao-contas")} disabled={gerando}
+                  <button onClick={() => baixarPlanilha("prestacao-contas")} disabled={gerando || parseValorInput(valorAdiantamento) <= 0}
                     className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">
                     <DownloadIcon size={16} /> Baixar prestação de contas
                   </button>
@@ -1053,36 +1134,6 @@ function App() {
             </p>
           )}
 
-          {historico.length > 0 && (
-            <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
-              <h2 className="font-display text-lg font-bold">Histórico de gerações</h2>
-              <p className="mt-1 text-xs text-slate-500">Planilhas e relatórios já gerados ficam arquivados aqui.</p>
-              <ul className="mt-3 divide-y divide-slate-100">
-                {historico.map((item) => (
-                  <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
-                    <div>
-                      <p className="text-sm font-medium text-slate-800">{TIPO_LABEL[item.tipo] || item.tipo}</p>
-                      <p className="text-xs text-slate-500">
-                        {new Date(item.criadoEm).toLocaleString("pt-BR")} · {formatValor(item.totalGeral)}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1">
-                      <a href={`/.netlify/functions/historico?id=${encodeURIComponent(item.id)}&file=xlsx`}
-                        className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">Excel</a>
-                      {item.temPdf && (
-                        <a href={`/.netlify/functions/historico?id=${encodeURIComponent(item.id)}&file=pdf`}
-                          className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">PDF</a>
-                      )}
-                      <button onClick={() => reabrirHistorico(item)}
-                        className="rounded-md border border-amber-400 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100">Reabrir</button>
-                      <button onClick={() => excluirHistorico(item)} title="Excluir"
-                        className="rounded p-1.5 text-red-600 hover:bg-red-100"><TrashIcon size={14} /></button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
         </main>
       )}
 
@@ -1141,28 +1192,10 @@ function App() {
           </div>
 
           <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="font-display text-lg font-bold">Presets de rateio</h2>
-                <p className="mt-1 text-xs text-slate-500">Usinas, centros de custo e projetos usados com frequência.</p>
-              </div>
-              <button onClick={() => setPresets([...presets, { centroCusto: "", nCentroCusto: "", projeto: "", nProjeto: "", fase: "17", percentual: "" }])}
-                className="text-xs font-medium text-amber-700 hover:text-amber-900">+ linha</button>
-            </div>
+            <h2 className="font-display text-lg font-bold">Presets de rateio</h2>
+            <p className="mt-1 text-xs text-slate-500">Usinas, centros de custo e projetos usados com frequência. A soma dos percentuais dos projetos de cada centro de custo deve dar 100%.</p>
             <div className="mt-3">
-              {presets.map((r, i) => (
-                <div key={i} className="mb-1.5 grid grid-cols-2 gap-1.5 sm:grid-cols-7">
-                  <input value={r.centroCusto} onChange={(e) => setPresets(presets.map((x, j) => j === i ? { ...x, centroCusto: e.target.value } : x))} placeholder="Centro de custo" className="col-span-2 rounded border border-slate-300 px-2 py-1 text-xs" />
-                  <input value={r.nCentroCusto} onChange={(e) => setPresets(presets.map((x, j) => j === i ? { ...x, nCentroCusto: e.target.value } : x))} placeholder="Nº CC" className="rounded border border-slate-300 px-2 py-1 text-xs" />
-                  <input value={r.projeto} onChange={(e) => setPresets(presets.map((x, j) => j === i ? { ...x, projeto: e.target.value } : x))} placeholder="Projeto" className="rounded border border-slate-300 px-2 py-1 text-xs" />
-                  <input value={r.nProjeto} onChange={(e) => setPresets(presets.map((x, j) => j === i ? { ...x, nProjeto: e.target.value } : x))} placeholder="Nº projeto" className="rounded border border-slate-300 px-2 py-1 text-xs" />
-                  <input value={r.fase} onChange={(e) => setPresets(presets.map((x, j) => j === i ? { ...x, fase: e.target.value } : x))} placeholder="Fase" className="rounded border border-slate-300 px-2 py-1 text-xs" />
-                  <div className="flex gap-1">
-                    <input value={r.percentual} onChange={(e) => setPresets(presets.map((x, j) => j === i ? { ...x, percentual: e.target.value } : x))} placeholder="%" className="w-full rounded border border-slate-300 px-2 py-1 text-xs" />
-                    <button onClick={() => setPresets(presets.filter((_, j) => j !== i))} className="rounded p-1 text-red-600 hover:bg-red-100"><TrashIcon size={13} /></button>
-                  </div>
-                </div>
-              ))}
+              <RateioEditor grupos={presets} setGrupos={setPresets} />
             </div>
             <div className="mt-3 flex gap-2">
               <button onClick={savePresets} className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
@@ -1184,9 +1217,14 @@ function App() {
               <ArrowLeftIcon size={15} /> Voltar
             </button>
             {reportPages.length > 0 && (
-              <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800">
-                <PrinterIcon size={15} /> Imprimir / salvar em PDF
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button onClick={baixarTodosComprovantes} className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                  <DownloadIcon size={15} /> Baixar todos (.zip)
+                </button>
+                <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800">
+                  <PrinterIcon size={15} /> Imprimir / salvar em PDF
+                </button>
+              </div>
             )}
           </div>
 
@@ -1204,7 +1242,14 @@ function App() {
                       Página {idx + 1} de {reportPages.length}
                       {r.totalPages > 1 && <span className="ml-1 text-slate-400">(arquivo {r.page}/{r.totalPages})</span>}
                     </span>
-                    <span className="font-mono-num">{r.data} · {r.tipo} · {formatValor(r.valor)}</span>
+                    <span className="flex items-center gap-2">
+                      <span className="font-mono-num">{r.data} · {r.tipo} · {formatValor(r.valor)}</span>
+                      {r.src && (
+                        <button onClick={() => baixarComprovante(r, idx)} title="Baixar este comprovante" className="no-print rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+                          <DownloadIcon size={14} />
+                        </button>
+                      )}
+                    </span>
                   </div>
                   {r.src ? (
                     <img src={r.src} alt={r.fileName || "comprovante"} className="mx-auto max-h-[70vh] w-auto rounded" />
@@ -1260,10 +1305,40 @@ function App() {
                 <img src={fileUrl(rec.id)} alt="Comprovante" className="max-h-[85vh] max-w-full rounded shadow-lg" />
               )}
             </div>
-            <div className="mt-2 text-xs text-white/80">
-              {rec.fileName}{isPdf && total > 1 ? ` · ${total} páginas` : ""}
+            <div className="mt-2 flex items-center gap-3 text-xs text-white/80">
+              <span>{rec.fileName}{isPdf && total > 1 ? ` · ${total} páginas` : ""}</span>
+              <button onClick={() => baixarComprovanteOriginal(rec)} className="inline-flex items-center gap-1 rounded bg-white/10 px-2 py-1 hover:bg-white/20">
+                <DownloadIcon size={13} /> Baixar
+              </button>
             </div>
             <button onClick={() => setPreviewId(null)} className="absolute right-4 top-4 rounded-full bg-white/90 p-2 text-slate-700 hover:bg-white"><XIcon size={18} /></button>
+          </div>
+        );
+      })()}
+
+      {avisoLimite && (() => {
+        const rec = records.find((r) => r.id === avisoLimite.id);
+        if (!rec) return null;
+        return (
+          <div className="no-print fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+            <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl">
+              <div className="flex items-center gap-2 text-amber-700">
+                <AlertIcon size={20} />
+                <h3 className="font-display text-base font-bold">Valor acima do limite</h3>
+              </div>
+              <p className="mt-2 text-sm text-slate-600">
+                {rec.tipo} de {rec.data} no valor de <span className="font-mono-num font-semibold">{formatValor(rec.valor)}</span> está
+                acima do limite de R$ 35,00. Essa despesa inclui mais de uma pessoa?
+              </p>
+              <div className="mt-3 space-y-2">
+                <Field label="Quantas pessoas" value={avisoLimite.pessoas} onChange={(v) => setAvisoLimite({ ...avisoLimite, pessoas: v })} placeholder="Ex.: 3" />
+                <Field label="Nomes das pessoas" value={avisoLimite.nomes} onChange={(v) => setAvisoLimite({ ...avisoLimite, nomes: v })} placeholder="Ex.: João, Maria" />
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <button onClick={() => confirmarAvisoLimite(false)} className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Não, é só isso</button>
+                <button onClick={() => confirmarAvisoLimite(true)} className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800">Registrar pessoas</button>
+              </div>
+            </div>
           </div>
         );
       })()}

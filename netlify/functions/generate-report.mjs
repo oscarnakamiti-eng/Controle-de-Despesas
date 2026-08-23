@@ -5,8 +5,7 @@
 // planilha e recompactamos. Nenhuma biblioteca de Excel é usada — o arquivo sai
 // idêntico ao original em formatação, fórmulas, mesclagens e logomarca.
 //
-// POST { tipo, profile, motivo, valorAdiantamento, rateio: [...], records: [...], previsoes: [...], historyId? }
-// Com historyId, a planilha gerada também é arquivada em hist-file:<historyId>:xlsx.
+// POST { tipo, profile, motivo, valorAdiantamento, rateio: [...], records: [...], previsoes: [...] }
 
 import { unzipSync, zipSync } from "fflate";
 import path from "path";
@@ -268,13 +267,6 @@ export default async (req) => {
 
     arquivos[nomeSheet] = new TextEncoder().encode(xml);
     const saida = zipSync(arquivos, { level: 6 });
-
-    if (body.historyId) {
-      try {
-        const store = getStore("expense-tracker");
-        await store.set(`hist-file:${body.historyId}:xlsx`, Buffer.from(saida));
-      } catch { /* não impede o download */ }
-    }
 
     return new Response(saida, {
       status: 200,

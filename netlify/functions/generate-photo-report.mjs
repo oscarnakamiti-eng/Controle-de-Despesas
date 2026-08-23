@@ -2,8 +2,7 @@
 // comprovantes já guardados nos Blobs. Recebe só os identificadores das
 // páginas (não as imagens), pra não esbarrar no limite de payload do Lambda.
 //
-// POST { historyId?, pages: [{ id, page, mediaType, data, tipo, valor, obs }, ...] }
-// Se historyId vier preenchido, o PDF também é arquivado em hist-file:<historyId>:pdf.
+// POST { pages: [{ id, page, mediaType, data, tipo, valor, obs }, ...] }
 
 import { getStore } from "@netlify/blobs";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
@@ -90,10 +89,6 @@ export default async (req) => {
     }
 
     const pdfBytes = await pdfDoc.save();
-
-    if (body.historyId) {
-      try { await store.set(`hist-file:${body.historyId}:pdf`, Buffer.from(pdfBytes)); } catch { /* não impede o download */ }
-    }
 
     return new Response(pdfBytes, {
       status: 200,
