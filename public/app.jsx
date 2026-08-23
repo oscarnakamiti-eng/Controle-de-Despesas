@@ -788,8 +788,16 @@ function App() {
       showToast("Informe o valor que foi adiantado — a prestação de contas é sempre referente a um adiantamento.", true);
       return;
     }
-    setGerando(true);
     const isAdiantamentoReq = tipo === "solicitacao-adiantamento";
+    const alvoZerado = isAdiantamentoReq
+      ? `${previsoes.length} despesa(s) prevista(s)`
+      : `${sorted.length} lançamento(s) da tabela de despesas`;
+    if (!window.confirm(
+      `Isso vai gerar e baixar o formulário, o relatório fotográfico e as fotos num .zip. ` +
+      `Assim que terminar, ${alvoZerado} serão apagados (junto com motivo e rateio), para começar o próximo ciclo. Continuar?`
+    )) return;
+
+    setGerando(true);
     const registrosCompletos = isAdiantamentoReq ? [] : sorted.map(({ dateObj, ...resto }) => resto);
     const itensParaPlanilha = registrosCompletos.map((r) => ({ data: r.data, tipo: r.tipo, obs: r.obs, valor: r.valor }));
     const itensPrevisoes = isAdiantamentoReq ? previsoes.map((p) => ({ obs: p.obs, valor: parseValorInput(p.valor) })) : [];
