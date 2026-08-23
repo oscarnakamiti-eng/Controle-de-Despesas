@@ -880,7 +880,16 @@ function App() {
       const zipBytes = window.fflate.zipSync(arquivosZip, { level: 6 });
       await escreverArquivo(handle, new Blob([zipBytes], { type: "application/zip" }), ZIP_NOMES[tipo]);
 
-      if (isAdiantamentoReq) setPrevisoes([]); else setRecords([]);
+      if (isAdiantamentoReq) {
+        setPrevisoes([]);
+        // O valor pedido na solicitação de adiantamento passa a preencher
+        // sozinho o campo "valor que foi adiantado" da prestação de contas
+        // (passo 2) — não precisa digitar de novo. Continua editável, caso
+        // o valor realmente depositado seja diferente do pedido.
+        setValorAdiantamento(formatValor(totalPrevisto));
+      } else {
+        setRecords([]);
+      }
       setMotivo(""); setRateio([]);
       if (tipo === "prestacao-contas") setValorAdiantamento("");
 
@@ -1224,6 +1233,7 @@ function App() {
                   <input value={valorAdiantamento} onChange={(e) => setValorAdiantamento(e.target.value)} placeholder="0,00" inputMode="decimal"
                     className="w-full rounded border border-slate-300 px-2 py-1.5 text-right text-sm font-mono-num" />
                 </label>
+                <p className="mt-1 text-xs text-slate-400">Preenchido automaticamente com o valor pedido na solicitação de adiantamento — ajuste aqui se o valor recebido foi diferente.</p>
                 {parseValorInput(valorAdiantamento) <= 0 && (
                   <p className="mt-1 text-xs text-amber-700">Obrigatório — a prestação de contas é sempre referente a um adiantamento.</p>
                 )}
