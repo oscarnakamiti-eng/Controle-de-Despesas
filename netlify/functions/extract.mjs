@@ -23,6 +23,20 @@ function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
+// Grava no Blob e confirma lendo de volta antes de devolver sucesso. Já
+// aconteceu de store.set() não lançar erro mesmo assim o arquivo não ficar
+// salvo de verdade (comprovante "perdido" em envios em lote) — em vez de só
+// confiar que não deu erro, confere o tamanho gravado e tenta de novo antes
+// de desistir.
+async function gravarComConfirmacao(store, key, bytes, tentativas = 2) {
+  for (let i = 0; i <= tentativas; i++) {
+    await store.set(key, bytes);
+    const conferido = await store.get(key, { type: "arrayBuffer" });
+    if (conferido && conferido.byteLength === bytes.byteLength) return;
+  }
+  throw new Error("Não foi possível confirmar a gravação do arquivo nos Blobs após múltiplas tentativas.");
+}
+
 export default async (req) => {
   if (req.method !== "POST") return json({ error: "Método não permitido" }, 405);
 
@@ -74,7 +88,7 @@ export default async (req) => {
     try {
       const store = getStore("expense-tracker");
       const bytes = Buffer.from(base64, "base64");
-      await store.set(`file:${id}`, bytes);
+      await gravarComConfirmacao(store, `file:${id}`, bytes);
       await store.setJSON(`file-meta:${id}`, { mediaType: isPdf ? "application/pdf" : (mediaType || "image/jpeg"), fileName: fileName || null });
     } catch (err) {
       // não falha a extração por causa disso — só avisa
