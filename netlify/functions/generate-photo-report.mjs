@@ -82,6 +82,13 @@ function textoSeguro(s) {
   return String(s || "").replace(/[^\x20-\x7EÀ-ÿ]/g, "").slice(0, 160);
 }
 
+// Encolhe o tamanho da fonte até o texto caber na largura disponível.
+function ajustarTamanho(font, texto, tamanhoInicial, larguraMax, minimo = 7) {
+  let tamanho = tamanhoInicial;
+  while (tamanho > minimo && font.widthOfTextAtSize(texto, tamanho) > larguraMax) tamanho -= 1;
+  return tamanho;
+}
+
 async function buscarImagem(store, p) {
   const isPdf = p.mediaType === "application/pdf";
   const bytes = isPdf
@@ -109,11 +116,17 @@ export default async (req) => {
     // relatório segue normalmente só com as fotos (não trava por causa disso).
     let pdfDoc = null;
     let avisoConversao = null;
+    let temPaginaXlsx = false;
     if (xlsxBase64) {
       try {
         const pdfConvertido = await converterXlsxParaPdf(Buffer.from(xlsxBase64, "base64"));
         if (pdfConvertido) {
           pdfDoc = await PDFDocument.load(pdfConvertido);
+          // A planilha tem mais de uma aba (ex.: "Histórico de Revisão") e o
+          // CloudConvert converte todas — só a primeira página (o formulário
+          // em si) deve entrar no relatório.
+          for (let i = pdfDoc.getPageCount() - 1; i >= 1; i--) pdfDoc.removePage(i);
+          temPaginaXlsx = pdfDoc.getPageCount() > 0;
         } else {
           avisoConversao = "CLOUDCONVERT_API_KEY não configurada — relatório gerado sem a página da planilha.";
         }
@@ -126,22 +139,35 @@ export default async (req) => {
     const fonte = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const fonteNegrito = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
+    const totalPaginas = (temPaginaXlsx ? 1 : 0) + pages.length;
+    let indicePagina = temPaginaXlsx ? 1 : 0;
+
     for (const p of pages) {
+      indicePagina++;
       const page = pdfDoc.addPage([LARGURA, ALTURA]);
       const topo = ALTURA - MARGEM;
+      const larguraDisponivel = LARGURA - MARGEM * 2;
       const temObs = !!p.obs;
 
-      const valorFmt = (Number(p.valor) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      const legenda = textoSeguro(`${p.data || ""}   -   ${p.tipo || ""}   -   R$ ${valorFmt}`);
+      // Cabeçalho: data e tipo, alinhado à esquerda.
+      try {
+        const cabecalho = textoSeguro(`${p.data || ""}   -   ${p.tipo || ""}`);
+        const tam = ajustarTamanho(fonteNegrito, cabecalho, 11, larguraDisponivel);
+        page.drawText(cabecalho, { x: MARGEM, y: topo - 10, size: tam, font: fonteNegrito, color: rgb(0.1, 0.1, 0.15) });
+      } catch { /* ignora */ }
 
+      // Legenda: histórico (observação), centralizada.
       if (temObs) {
         try {
-          page.drawText(textoSeguro(p.obs), { x: MARGEM, y: topo - 10, size: 9, font: fonte, color: rgb(0.3, 0.3, 0.35) });
-        } catch { /* caractere não suportado: segue sem a observação */ }
+          const textoObs = textoSeguro(p.obs);
+          const tam = ajustarTamanho(fonte, textoObs, 10, larguraDisponivel);
+          const x = (LARGURA - fonte.widthOfTextAtSize(textoObs, tam)) / 2;
+          page.drawText(textoObs, { x, y: topo - 28, size: tam, font: fonte, color: rgb(0.3, 0.3, 0.35) });
+        } catch { /* caractere não suportado: segue sem a legenda */ }
       }
 
-      const yImagemTopo = topo - (temObs ? 30 : 10);
-      const yImagemBase = MARGEM + 30;
+      const yImagemTopo = topo - (temObs ? 45 : 25);
+      const yImagemBase = MARGEM + 24;
       const centroY = (yImagemTopo + yImagemBase) / 2;
 
       const bytes = await buscarImagem(store, p);
@@ -152,9 +178,8 @@ export default async (req) => {
       }
 
       if (img) {
-        const areaW = LARGURA - MARGEM * 2;
         const areaH = yImagemTopo - yImagemBase;
-        const escala = Math.min(areaW / img.width, areaH / img.height, 1);
+        const escala = Math.min(larguraDisponivel / img.width, areaH / img.height, 1);
         const w = img.width * escala, h = img.height * escala;
         page.drawImage(img, { x: (LARGURA - w) / 2, y: yImagemBase + (areaH - h) / 2, width: w, height: h });
       } else {
@@ -163,8 +188,12 @@ export default async (req) => {
         } catch { /* ignora */ }
       }
 
+      // Rodapé: numeração de página, centralizada.
       try {
-        page.drawText(legenda, { x: MARGEM, y: MARGEM + 14, size: 11, font: fonteNegrito, color: rgb(0.1, 0.1, 0.15) });
+        const textoPagina = `Página ${indicePagina} de ${totalPaginas}`;
+        const tam = ajustarTamanho(fonte, textoPagina, 10, larguraDisponivel);
+        const x = (LARGURA - fonte.widthOfTextAtSize(textoPagina, tam)) / 2;
+        page.drawText(textoPagina, { x, y: MARGEM + 10, size: tam, font: fonte, color: rgb(0.4, 0.4, 0.45) });
       } catch { /* ignora */ }
     }
 
