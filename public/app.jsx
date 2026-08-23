@@ -1026,7 +1026,14 @@ function App() {
             </div>
           )}
 
-          <div className="no-print mt-4 flex flex-wrap items-center justify-end gap-3">
+          <div className="no-print mt-4 flex flex-wrap items-center justify-between gap-3">
+            {sorted.length > 0 && (
+              <button
+                onClick={() => setSelecionados(sorted.every((r) => selecionados.has(r.id)) ? new Set() : new Set(sorted.map((r) => r.id)))}
+                className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                <CheckIcon size={15} /> {sorted.every((r) => selecionados.has(r.id)) ? "Desmarcar todas" : "Selecionar todas"}
+              </button>
+            )}
             {reviewCount > 0 && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800">
                 <AlertIcon size={13} /> {reviewCount} lançamento(s) a revisar
