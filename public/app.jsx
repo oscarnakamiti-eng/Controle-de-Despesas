@@ -336,11 +336,24 @@ function App() {
             body: JSON.stringify({ records: recordsRef.current, etag: recordsEtagRef.current }),
           });
           if (res.status === 409) {
-            showToast("Outra pessoa salvou alterações nesta tabela ao mesmo tempo. Recarregando os dados mais recentes — refaça sua última edição se precisar.", true);
+            // Não descarta a edição local: mescla por id em cima dos dados
+            // mais recentes do servidor, preservando lançamentos que só
+            // existem aqui (ex.: um comprovante que acabou de ser
+            // processado) em vez de apagá-los por causa do conflito.
             const fresh = await apiGet("records");
-            setRecords(fresh.records || []);
+            const idsFrescos = new Set((fresh.records || []).map((r) => r.id));
+            const somenteLocais = recordsRef.current.filter((r) => !idsFrescos.has(r.id));
+            const mesclado = somenteLocais.length > 0 ? [...(fresh.records || []), ...somenteLocais] : (fresh.records || []);
+            recordsEtagRef.current = fresh.etag ?? null;
+            setRecords(mesclado);
             setRecordsEtag(fresh.etag ?? null);
-            pendenteRef.current = false;
+            if (somenteLocais.length > 0) {
+              showToast(`Outra gravação aconteceu ao mesmo tempo — ${somenteLocais.length} lançamento(s) local(is) preservado(s) e mesclado(s).`);
+              pendenteRef.current = true; // persiste a mesclagem
+            } else {
+              showToast("Outra pessoa salvou alterações nesta tabela ao mesmo tempo. Dados atualizados.", true);
+              pendenteRef.current = false;
+            }
           } else {
             const data = await parseJsonResponse(res);
             recordsEtagRef.current = data.etag ?? null;
