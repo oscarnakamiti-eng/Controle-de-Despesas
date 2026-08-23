@@ -501,17 +501,21 @@ function App() {
         } catch { /* o Excel já foi gerado; o relatório em PDF fica só pendente */ }
       }
 
-      await apiPost("historico", {
-        historyId, tipo, motivo, valorAdiantamento: parseValorInput(valorAdiantamento), rateio,
+      const entradaHistorico = {
+        id: historyId, criadoEm: new Date().toISOString(), tipo, motivo,
+        valorAdiantamento: parseValorInput(valorAdiantamento), rateio,
         records: registrosCompletos, previsoes: itensPrevisoes, totalGeral,
         xlsxNome: XLSX_NOMES[tipo], temPdf,
-      }).catch(() => {});
+      };
+      await apiPost("historico", { ...entradaHistorico, historyId }).catch(() => {});
+      // Atualiza a lista na hora (o índice nos Blobs pode levar alguns
+      // segundos pra refletir a gravação numa releitura).
+      setHistorico((prev) => [entradaHistorico, ...prev]);
 
       if (isAdiantamentoReq) setPrevisoes([]); else setRecords([]);
       setMotivo(""); setRateio([]);
       if (tipo === "prestacao-contas") setValorAdiantamento("");
 
-      carregarHistorico();
       const precisaPdf = !isAdiantamentoReq && reportPages.length > 0;
       showToast(
         precisaPdf && !temPdf
