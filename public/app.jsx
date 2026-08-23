@@ -59,7 +59,15 @@ function parseValorInput(raw) {
   if (typeof raw === "number") return raw;
   let s = String(raw || "").trim();
   if (!s) return 0;
-  if (s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
+  if (s.includes(",")) {
+    // "1.234,56" -> ponto é milhar, vírgula é decimal
+    s = s.replace(/\./g, "").replace(",", ".");
+  } else {
+    // Sem vírgula: só existe decimal se o ponto vier seguido de 1-2 dígitos
+    // finais. "1.200" (3 dígitos) é milhar em pt-BR -> 1200, não 1.2.
+    const partes = s.split(".");
+    if (partes.length > 1 && partes[partes.length - 1].length === 3) s = partes.join("");
+  }
   const n = parseFloat(s);
   return isNaN(n) ? 0 : n;
 }
@@ -183,6 +191,7 @@ function EditRow({ draft, setDraft, onSave, onCancel }) {
 function App() {
   const [view, setView] = useState("tabela"); // tabela | relatorio | perfil | gerar
   const [records, setRecords] = useState([]);
+  const [recordsEtag, setRecordsEtag] = useState(null);
   const [profile, setProfile] = useState({});
   const [presets, setPresets] = useState([]);
   const [loaded, setLoaded] = useState(false);
@@ -211,6 +220,7 @@ function App() {
       try {
         const [r, p, rp] = await Promise.all([apiGet("records"), apiGet("profile"), apiGet("rateio")]);
         setRecords(r.records || []);
+        setRecordsEtag(r.etag ?? null);
         setProfile(p.profile || {});
         setPresets(rp.presets || []);
         setRateio(rp.presets || []);
@@ -222,7 +232,26 @@ function App() {
 
   useEffect(() => {
     if (!loaded) return;
-    apiPost("records", { records }).catch(() => {});
+    (async () => {
+      try {
+        const res = await fetch("/.netlify/functions/records", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ records, etag: recordsEtag }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 409) {
+          showToast("Outra pessoa salvou alterações nesta tabela ao mesmo tempo. Recarregando os dados mais recentes — refaça sua última edição se precisar.", true);
+          const fresh = await apiGet("records");
+          setRecords(fresh.records || []);
+          setRecordsEtag(fresh.etag ?? null);
+          return;
+        }
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        setRecordsEtag(data.etag ?? null);
+      } catch (e) {
+        showToast(`Falha ao salvar despesas: ${e.message}`, true);
+      }
+    })();
   }, [records, loaded]);
 
   const showToast = (msg, isError) => {

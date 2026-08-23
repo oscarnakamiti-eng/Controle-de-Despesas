@@ -64,6 +64,13 @@ function escaparXml(v) {
   return String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// Aceita "12,5" (vírgula, como o resto do app) além de "12.5"
+function parsePercentual(raw) {
+  if (raw === undefined || raw === null || raw === "") return null;
+  const n = Number(String(raw).trim().replace(",", "."));
+  return isNaN(n) ? null : n;
+}
+
 // Data no formato DD/MM/AAAA -> número de série do Excel
 function serialDeData(str) {
   const m = String(str || "").trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
@@ -124,8 +131,8 @@ export default async (req) => {
       texto[`${rc.projeto}${row}`] = r.projeto || "";
       texto[`${rc.nProjeto}${row}`] = r.nProjeto || "";
       texto[`${rc.fase}${row}`] = (r.fase === undefined || r.fase === null) ? "" : r.fase;
-      const pct = Number(r.percentual);
-      if (!isNaN(pct) && r.percentual !== "" && r.percentual !== null) numero[`${rc.percentual}${row}`] = pct / 100;
+      const pct = parsePercentual(r.percentual);
+      if (pct !== null) numero[`${rc.percentual}${row}`] = pct / 100;
     });
 
     const ic = form.itemCols;

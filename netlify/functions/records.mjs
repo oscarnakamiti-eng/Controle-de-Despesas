@@ -67,10 +67,10 @@ export default async (req) => {
 
   if (req.method === "GET") {
     try {
-      const buffer = await store.get(FILE_KEY, { type: "arrayBuffer" });
-      if (!buffer) return json({ records: [] });
-      const records = workbookBufferToRecords(Buffer.from(buffer));
-      return json({ records });
+      const result = await store.getWithMetadata(FILE_KEY, { type: "arrayBuffer" });
+      if (!result) return json({ records: [], etag: null });
+      const records = workbookBufferToRecords(Buffer.from(result.data));
+      return json({ records, etag: result.etag });
     } catch (err) {
       return json({ error: `Falha ao ler a planilha: ${String(err.message || err)}` }, 500);
     }
@@ -80,10 +80,23 @@ export default async (req) => {
     let body;
     try { body = await req.json(); } catch { return json({ error: "Corpo da requisição inválido" }, 400); }
     const records = Array.isArray(body.records) ? body.records : [];
+    const clientEtag = body.etag === undefined ? null : body.etag;
     try {
+      // Detecta gravação concorrente: se alguém salvou depois que este
+      // cliente carregou os dados, recusa em vez de sobrescrever em silêncio.
+      const atual = await store.getMetadata(FILE_KEY);
+      const etagAtual = atual ? atual.etag : null;
+      if (clientEtag !== etagAtual) {
+        return json({
+          error: "Os dados foram alterados por outra pessoa nesse meio-tempo. Recarregue para ver a versão mais recente.",
+          conflict: true,
+          etag: etagAtual,
+        }, 409);
+      }
       const buffer = recordsToWorkbookBuffer(records);
       await store.set(FILE_KEY, buffer);
-      return json({ ok: true, count: records.length });
+      const depois = await store.getMetadata(FILE_KEY);
+      return json({ ok: true, count: records.length, etag: depois ? depois.etag : null });
     } catch (err) {
       return json({ error: `Falha ao gravar a planilha: ${String(err.message || err)}` }, 500);
     }
