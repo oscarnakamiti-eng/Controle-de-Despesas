@@ -484,6 +484,7 @@ function App() {
   recordsEtagRef.current = recordsEtag;
   const salvandoRef = useRef(false);
   const pendenteRef = useRef(false);
+  const conflitosSeguidosRef = useRef(0);
 
   const salvarRecords = useCallback(async () => {
     if (salvandoRef.current) { pendenteRef.current = true; return; }
@@ -497,25 +498,25 @@ function App() {
             body: JSON.stringify({ records: recordsRef.current, etag: recordsEtagRef.current }),
           });
           if (res.status === 409) {
-            // Não descarta a edição local: mescla por id em cima dos dados
-            // mais recentes do servidor, preservando lançamentos que só
-            // existem aqui (ex.: um comprovante que acabou de ser
-            // processado) em vez de apagá-los por causa do conflito.
-            const fresh = await apiGet("records");
-            const idsFrescos = new Set((fresh.records || []).map((r) => r.id));
-            const somenteLocais = recordsRef.current.filter((r) => !idsFrescos.has(r.id));
-            const mesclado = somenteLocais.length > 0 ? [...(fresh.records || []), ...somenteLocais] : (fresh.records || []);
-            recordsEtagRef.current = fresh.etag ?? null;
-            setRecords(mesclado);
-            setRecordsEtag(fresh.etag ?? null);
-            if (somenteLocais.length > 0) {
-              showToast(`Outra gravação aconteceu ao mesmo tempo — ${somenteLocais.length} lançamento(s) local(is) preservado(s) e mesclado(s).`);
-              pendenteRef.current = true; // persiste a mesclagem
-            } else {
-              showToast("Outra pessoa salvou alterações nesta tabela ao mesmo tempo. Dados atualizados.", true);
+            // Não busca nem mescla dados do servidor: o que está na tela
+            // agora já é a intenção mais recente do usuário, incluindo
+            // edições em lançamentos existentes (ex.: o ajuste do valor da
+            // refeição pro limite). Trazer e mesclar dados "frescos" do
+            // servidor já causou o oposto do que devia — descartava essa
+            // edição e trazia de volta o valor antigo. Só busca o etag
+            // atualizado e tenta gravar de novo com os dados locais.
+            conflitosSeguidosRef.current += 1;
+            if (conflitosSeguidosRef.current > 8) {
+              showToast("Não foi possível sincronizar as despesas (muitas gravações ao mesmo tempo). Recarregue a página antes de continuar.", true);
               pendenteRef.current = false;
+            } else {
+              const fresh = await apiGet("records");
+              recordsEtagRef.current = fresh.etag ?? null;
+              setRecordsEtag(fresh.etag ?? null);
+              pendenteRef.current = true; // tenta de novo com o etag atualizado
             }
           } else {
+            conflitosSeguidosRef.current = 0;
             const data = await parseJsonResponse(res);
             recordsEtagRef.current = data.etag ?? null;
             setRecordsEtag(data.etag ?? null);
