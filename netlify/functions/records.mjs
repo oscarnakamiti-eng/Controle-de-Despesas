@@ -63,7 +63,11 @@ function recordsToWorkbookBuffer(records) {
 }
 
 export default async (req) => {
-  const store = getStore("expense-tracker");
+  // Consistência forte: a checagem de etag no POST precisa ver a última
+  // gravação na hora, sem esperar a propagação (podia levar alguns segundos
+  // com consistência eventual, gerando "falso conflito" mesmo sem ninguém
+  // mais mexendo na tabela, especialmente com gravações em sequência rápida).
+  const store = getStore("expense-tracker", { consistency: "strong" });
 
   if (req.method === "GET") {
     try {
