@@ -378,20 +378,20 @@ function RateioEditor({ grupos, setGrupos }) {
         const somaOk = projetos.length === 0 || Math.abs(soma - 100) < 0.01;
         return (
           <div key={gi} className="rounded-md border border-slate-200 p-2.5">
-            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-6">
-              <input value={g.centroCusto} onChange={(e) => updateGrupo(gi, "centroCusto", e.target.value)} placeholder="Centro de custo" className="col-span-2 rounded border border-slate-300 px-2 py-1 text-xs sm:col-span-4" />
-              <input value={g.nCentroCusto} onChange={(e) => updateGrupo(gi, "nCentroCusto", e.target.value)} placeholder="Nº CC" className="rounded border border-slate-300 px-2 py-1 text-xs" />
-              <button onClick={() => removeGrupo(gi)} title="Excluir centro de custo" className="flex items-center justify-center rounded p-1 text-red-600 hover:bg-red-100"><TrashIcon size={13} /></button>
+            <div className="grid grid-cols-[3fr_1fr_auto] gap-1">
+              <input value={g.centroCusto} onChange={(e) => updateGrupo(gi, "centroCusto", e.target.value)} placeholder="Centro de custo" className="min-w-0 rounded border border-slate-300 px-1.5 py-1 text-xs" />
+              <input value={g.nCentroCusto} onChange={(e) => updateGrupo(gi, "nCentroCusto", e.target.value)} placeholder="Nº CC" className="min-w-0 rounded border border-slate-300 px-1.5 py-1 text-xs" />
+              <button onClick={() => removeGrupo(gi)} title="Excluir centro de custo" className="flex shrink-0 items-center justify-center rounded p-1 text-red-600 hover:bg-red-100"><TrashIcon size={13} /></button>
             </div>
             <div className="mt-2 space-y-1.5 border-l-2 border-slate-100 pl-2">
               {projetos.map((p, pi) => (
-                <div key={pi} className="grid grid-cols-2 gap-1.5 sm:grid-cols-5">
-                  <input value={p.projeto} onChange={(e) => updateProjeto(gi, pi, "projeto", e.target.value)} placeholder="Projeto" className="col-span-2 rounded border border-slate-300 px-2 py-1 text-xs" />
-                  <input value={p.nProjeto} onChange={(e) => updateProjeto(gi, pi, "nProjeto", e.target.value)} placeholder="Nº projeto" className="rounded border border-slate-300 px-2 py-1 text-xs" />
-                  <input value={p.fase} onChange={(e) => updateProjeto(gi, pi, "fase", e.target.value)} placeholder="Fase" className="rounded border border-slate-300 px-2 py-1 text-xs" />
-                  <div className="flex gap-1">
-                    <input value={p.percentual} onChange={(e) => updateProjeto(gi, pi, "percentual", e.target.value)} placeholder="%" className="w-full rounded border border-slate-300 px-2 py-1 text-xs" />
-                    <button onClick={() => removeProjeto(gi, pi)} title="Excluir projeto" className="rounded p-1 text-red-600 hover:bg-red-100"><TrashIcon size={13} /></button>
+                <div key={pi} className="grid grid-cols-[2fr_1fr_0.6fr_1fr] gap-1">
+                  <input value={p.projeto} onChange={(e) => updateProjeto(gi, pi, "projeto", e.target.value)} placeholder="Projeto" className="min-w-0 rounded border border-slate-300 px-1.5 py-1 text-xs" />
+                  <input value={p.nProjeto} onChange={(e) => updateProjeto(gi, pi, "nProjeto", e.target.value)} placeholder="Nº projeto" className="min-w-0 rounded border border-slate-300 px-1.5 py-1 text-xs" />
+                  <input value={p.fase} onChange={(e) => updateProjeto(gi, pi, "fase", e.target.value)} placeholder="Fase" className="min-w-0 rounded border border-slate-300 px-1.5 py-1 text-xs" />
+                  <div className="flex min-w-0 gap-1">
+                    <input value={p.percentual} onChange={(e) => updateProjeto(gi, pi, "percentual", e.target.value)} placeholder="%" className="w-full min-w-0 rounded border border-slate-300 px-1.5 py-1 text-xs" />
+                    <button onClick={() => removeProjeto(gi, pi)} title="Excluir projeto" className="shrink-0 rounded p-1 text-red-600 hover:bg-red-100"><TrashIcon size={13} /></button>
                   </div>
                 </div>
               ))}
