@@ -286,7 +286,9 @@ function EditRow({ draft, setDraft, onSave, onCancel }) {
           className="w-full rounded border border-slate-300 px-2 py-1 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500" />
       </td>
       <td className="px-3 py-2 align-top">
-        <input value={draft.valor} onChange={(e) => setDraft({ ...draft, valor: e.target.value })} placeholder="0,00" inputMode="decimal"
+        <input value={draft.valor} onChange={(e) => setDraft({ ...draft, valor: e.target.value })}
+          onBlur={() => setDraft((d) => ({ ...d, valor: formatValor(parseValorInput(d.valor)) }))}
+          placeholder="0,00" inputMode="decimal"
           className="w-28 rounded border border-slate-300 px-2 py-1 text-right text-sm font-mono-num focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500" />
       </td>
       <td className="px-3 py-2 align-top">
@@ -1209,7 +1211,9 @@ function App() {
                   {previsoes.map((p, i) => (
                     <div key={i} className="mb-1.5 flex gap-1.5">
                       <input value={p.obs} onChange={(e) => setPrevisoes(previsoes.map((x, j) => j === i ? { ...x, obs: e.target.value } : x))} placeholder="Histórico da despesa prevista" className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm" />
-                      <input value={p.valor} onChange={(e) => setPrevisoes(previsoes.map((x, j) => j === i ? { ...x, valor: e.target.value } : x))} placeholder="0,00" inputMode="decimal" className="w-28 rounded border border-slate-300 px-2 py-1 text-right text-sm font-mono-num" />
+                      <input value={p.valor} onChange={(e) => setPrevisoes(previsoes.map((x, j) => j === i ? { ...x, valor: e.target.value } : x))}
+                        onBlur={() => setPrevisoes((prev) => prev.map((x, j) => j === i ? { ...x, valor: formatValor(parseValorInput(x.valor)) } : x))}
+                        placeholder="0,00" inputMode="decimal" className="w-28 rounded border border-slate-300 px-2 py-1 text-right text-sm font-mono-num" />
                       <button onClick={() => setPrevisoes(previsoes.filter((_, j) => j !== i))} className="rounded p-1.5 text-red-600 hover:bg-red-100"><TrashIcon size={14} /></button>
                     </div>
                   ))}
