@@ -35,6 +35,10 @@ export default async (req) => {
       const nome = String(body.nome || "").trim();
       if (!nome) return json({ error: "Informe o nome da pessoa." }, 400);
       const existente = await buscarCodigoPorNome(nome);
+      if (body.diag) {
+        const registroExistente = existente ? await buscarUsuarioPorCodigo(existente) : null;
+        return json({ diag: true, existente, tipoExistente: typeof existente, registroExistente });
+      }
       if (existente) {
         const registroExistente = await buscarUsuarioPorCodigo(existente);
         if (registroExistente && !registroExistente.revogado) {
