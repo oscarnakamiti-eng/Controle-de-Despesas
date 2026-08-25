@@ -35,10 +35,6 @@ export default async (req) => {
       const nome = String(body.nome || "").trim();
       if (!nome) return json({ error: "Informe o nome da pessoa." }, 400);
       const existente = await buscarCodigoPorNome(nome);
-      if (body.diag) {
-        const registroExistente = existente ? await buscarUsuarioPorCodigo(existente) : null;
-        return json({ diag: true, existente, tipoExistente: typeof existente, registroExistente });
-      }
       if (existente) {
         const registroExistente = await buscarUsuarioPorCodigo(existente);
         if (registroExistente && !registroExistente.revogado) {
@@ -73,7 +69,18 @@ export default async (req) => {
       return json({ codigo: novoCodigo, userId: registro.userId, link: `/?u=${novoCodigo}` });
     }
 
-    return json({ error: "Ação inválida. Use 'criar', 'revogar' ou 'regenerar'." }, 400);
+    if (acao === "vincular-login") {
+      // Backfill não-destrutivo: liga o nome de alguém já cadastrado (antes
+      // de existir login por nome) ao código que já tem, sem revogar nada
+      // nem afetar sessões já salvas no navegador da pessoa.
+      const codigo = String(body.codigo || "");
+      const registro = await buscarUsuarioPorCodigo(codigo);
+      if (!registro) return json({ error: "Código não encontrado." }, 404);
+      await vincularLogin(registro.nome, codigo);
+      return json({ ok: true, nome: registro.nome });
+    }
+
+    return json({ error: "Ação inválida. Use 'criar', 'revogar', 'regenerar' ou 'vincular-login'." }, 400);
   }
 
   return json({ error: "Método não permitido" }, 405);
