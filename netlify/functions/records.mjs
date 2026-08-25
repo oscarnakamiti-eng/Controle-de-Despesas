@@ -1,12 +1,12 @@
 // Netlify Function (v2) — a tabela de despesas fica salva como .xlsx real
-// no Netlify Blobs (store "expense-tracker", chave "despesas.xlsx").
-// GET  -> lê o .xlsx salvo e devolve { records: [...] }
-// POST -> recebe { records: [...] }, monta a planilha e substitui o arquivo salvo
+// no Netlify Blobs (store "expense-tracker"), numa chave própria por usuário.
+// GET  ?codigo=<codigo>  -> lê o .xlsx salvo e devolve { records: [...] }
+// POST ?codigo=<codigo>  { records: [...] } -> monta a planilha e substitui o arquivo salvo
 
 import { getStore } from "@netlify/blobs";
 import * as XLSX from "xlsx";
+import { resolverUsuario, chave } from "./lib/usuarios.mjs";
 
-const FILE_KEY = "despesas.xlsx";
 const HEADERS = ["ID", "Data", "Tipo", "Observações", "Valor", "Status", "Arquivo", "MediaType", "TemArquivo", "Paginas"];
 
 function json(body, status = 200) {
@@ -63,6 +63,10 @@ function recordsToWorkbookBuffer(records) {
 }
 
 export default async (req) => {
+  let userId;
+  try { userId = await resolverUsuario(req); } catch (err) { return json({ error: err.message }, err.status || 403); }
+  const FILE_KEY = chave(userId, "despesas.xlsx");
+
   // Consistência forte: a checagem de etag no POST precisa ver a última
   // gravação na hora, sem esperar a propagação (podia levar alguns segundos
   // com consistência eventual, gerando "falso conflito" mesmo sem ninguém

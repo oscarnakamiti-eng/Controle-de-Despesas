@@ -4,6 +4,8 @@
 // (preview, relatório fotográfico, reimpressão), mesmo depois de recarregar a página.
 
 import { getStore } from "@netlify/blobs";
+import { resolverUsuario } from "./lib/usuarios.mjs";
+import { chaveArquivo, chaveArquivoMeta } from "./files.mjs";
 
 const EXTRACTION_PROMPT = `Analise o comprovante, recibo, nota fiscal ou cupom fiscal anexado e extraia as informações do gasto.
 
@@ -39,6 +41,8 @@ async function gravarComConfirmacao(store, key, bytes, tentativas = 2) {
 
 export default async (req) => {
   if (req.method !== "POST") return json({ error: "Método não permitido" }, 405);
+  let userId;
+  try { userId = await resolverUsuario(req); } catch (err) { return json({ error: err.message }, err.status || 403); }
 
   let payload;
   try { payload = await req.json(); } catch { return json({ error: "Corpo da requisição inválido" }, 400); }
@@ -88,8 +92,8 @@ export default async (req) => {
     try {
       const store = getStore("expense-tracker", { consistency: "strong" });
       const bytes = Buffer.from(base64, "base64");
-      await gravarComConfirmacao(store, `file:${id}`, bytes);
-      await store.setJSON(`file-meta:${id}`, { mediaType: isPdf ? "application/pdf" : (mediaType || "image/jpeg"), fileName: fileName || null });
+      await gravarComConfirmacao(store, chaveArquivo(userId, id), bytes);
+      await store.setJSON(chaveArquivoMeta(userId, id), { mediaType: isPdf ? "application/pdf" : (mediaType || "image/jpeg"), fileName: fileName || null });
     } catch (err) {
       // não falha a extração por causa disso — só avisa
       return json({ parsed, fileStored: false, fileError: String(err.message || err) });

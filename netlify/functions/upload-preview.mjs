@@ -4,6 +4,8 @@
 // POST { id, page, base64 }
 
 import { getStore } from "@netlify/blobs";
+import { resolverUsuario } from "./lib/usuarios.mjs";
+import { chavePreview } from "./files.mjs";
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -24,6 +26,8 @@ async function gravarComConfirmacao(store, key, bytes, tentativas = 2) {
 
 export default async (req) => {
   if (req.method !== "POST") return json({ error: "Método não permitido" }, 405);
+  let userId;
+  try { userId = await resolverUsuario(req); } catch (err) { return json({ error: err.message }, err.status || 403); }
 
   let body;
   try { body = await req.json(); } catch { return json({ error: "Corpo da requisição inválido" }, 400); }
@@ -34,7 +38,7 @@ export default async (req) => {
   const n = Number(page) || 1;
   try {
     const store = getStore("expense-tracker", { consistency: "strong" });
-    await gravarComConfirmacao(store, `preview:${id}:${n}`, Buffer.from(base64, "base64"));
+    await gravarComConfirmacao(store, chavePreview(userId, id, n), Buffer.from(base64, "base64"));
     return json({ ok: true, page: n });
   } catch (err) {
     return json({ error: `Falha ao guardar a página: ${String(err.message || err)}` }, 500);

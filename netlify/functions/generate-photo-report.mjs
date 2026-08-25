@@ -9,6 +9,8 @@
 
 import { getStore } from "@netlify/blobs";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { resolverUsuario } from "./lib/usuarios.mjs";
+import { chaveArquivo, chavePreview } from "./files.mjs";
 
 const LARGURA = 595.28, ALTURA = 841.89; // A4 em pontos
 const MARGEM = 36;
@@ -89,16 +91,18 @@ function ajustarTamanho(font, texto, tamanhoInicial, larguraMax, minimo = 7) {
   return tamanho;
 }
 
-async function buscarImagem(store, p) {
+async function buscarImagem(store, userId, p) {
   const isPdf = p.mediaType === "application/pdf";
   const bytes = isPdf
-    ? await store.get(`preview:${p.id}:${p.page || 1}`, { type: "arrayBuffer" })
-    : await store.get(`file:${p.id}`, { type: "arrayBuffer" });
+    ? await store.get(chavePreview(userId, p.id, p.page || 1), { type: "arrayBuffer" })
+    : await store.get(chaveArquivo(userId, p.id), { type: "arrayBuffer" });
   return bytes ? new Uint8Array(bytes) : null;
 }
 
 export default async (req) => {
   if (req.method !== "POST") return json({ error: "Método não permitido" }, 405);
+  let userId;
+  try { userId = await resolverUsuario(req); } catch (err) { return json({ error: err.message }, err.status || 403); }
 
   let body;
   try { body = await req.json(); } catch { return json({ error: "Corpo da requisição inválido" }, 400); }
@@ -171,7 +175,7 @@ export default async (req) => {
       const yImagemBase = MARGEM + 24;
       const centroY = (yImagemTopo + yImagemBase) / 2;
 
-      const bytes = await buscarImagem(store, p);
+      const bytes = await buscarImagem(store, userId, p);
       let img = null;
       if (bytes) {
         try { img = ehPng(bytes) ? await pdfDoc.embedPng(bytes) : await pdfDoc.embedJpg(bytes); }
