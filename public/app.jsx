@@ -107,6 +107,7 @@ const CheckIcon = (p) => <Icon {...p}><path d="M20 6 9 17l-5-5" /></Icon>;
 const XIcon = (p) => <Icon {...p}><path d="M18 6 6 18" /><path d="M6 6l12 12" /></Icon>;
 const PrinterIcon = (p) => <Icon {...p}><path d="M6 9V2h12v7" /><rect x="6" y="14" width="12" height="8" rx="1" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /></Icon>;
 const LoaderIcon = (p) => <Icon {...p}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></Icon>;
+const RefreshIcon = (p) => <Icon {...p}><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M3 21v-5h5" /><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /></Icon>;
 const AlertIcon = (p) => <Icon {...p}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" /><path d="M12 9v4" /><path d="M12 17h.01" /></Icon>;
 const ImageIcon = (p) => <Icon {...p}><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-5-5L5 21" /></Icon>;
 const FileTextIcon = (p) => <Icon {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></Icon>;
@@ -276,6 +277,19 @@ async function converterPdfEmImagens(id, base64, onProgress) {
     await parseJsonResponse(res);
   }
   return total;
+}
+
+// Detecta uma versão nova do app publicada: compara o ETag do app.jsx que
+// está no ar agora contra o que foi carregado nesta aba. `cache: "no-store"`
+// + um parâmetro que muda a cada chamada evitam pegar uma resposta em cache
+// (do navegador ou de algum proxy no meio do caminho) em vez do arquivo real.
+async function buscarVersaoAtual() {
+  try {
+    const res = await fetch(`/app.jsx?_=${Date.now()}`, { method: "HEAD", cache: "no-store" });
+    return res.headers.get("etag") || res.headers.get("last-modified") || null;
+  } catch {
+    return null;
+  }
 }
 
 // --- chamadas às Netlify Functions ---
@@ -501,6 +515,8 @@ function App() {
   const [enviandoAssinatura, setEnviandoAssinatura] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(null);
+  const [versaoDesatualizada, setVersaoDesatualizada] = useState(false);
+  const versaoCarregadaRef = useRef(null);
   const [queue, setQueue] = useState([]);
   const [processing, setProcessing] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -541,6 +557,31 @@ function App() {
         setLoadError(String(e.message || e));
       } finally { setLoaded(true); }
     })();
+  }, []);
+
+  // Avisa quando sai uma versão nova do app enquanto a aba já está aberta —
+  // útil porque não há service worker nem recarregamento automático: sem
+  // isso, quem deixa a aba aberta por horas continua numa versão antiga sem
+  // perceber. Confere ao carregar, a cada alguns minutos e sempre que a aba
+  // volta a ficar visível/em foco (cobre quem deixa em outra aba/minimizado).
+  useEffect(() => {
+    let cancelado = false;
+    buscarVersaoAtual().then((v) => { if (!cancelado) versaoCarregadaRef.current = v; });
+    const checar = async () => {
+      if (!versaoCarregadaRef.current) return;
+      const v = await buscarVersaoAtual();
+      if (v && v !== versaoCarregadaRef.current) setVersaoDesatualizada(true);
+    };
+    const intervalo = setInterval(checar, 5 * 60 * 1000);
+    const aoVisivel = () => { if (document.visibilityState === "visible") checar(); };
+    window.addEventListener("focus", checar);
+    document.addEventListener("visibilitychange", aoVisivel);
+    return () => {
+      cancelado = true;
+      clearInterval(intervalo);
+      window.removeEventListener("focus", checar);
+      document.removeEventListener("visibilitychange", aoVisivel);
+    };
   }, []);
 
   // Salva o formulário de geração em preenchimento (rascunho), pra não se
@@ -1102,6 +1143,15 @@ function App() {
         </div>
         <div className="h-1 w-full bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500" />
       </header>
+
+      {versaoDesatualizada && (
+        <div className="no-print flex flex-wrap items-center justify-center gap-3 bg-amber-400 px-4 py-2 text-center text-sm font-medium text-slate-900">
+          <span>Uma nova versão deste aplicativo está disponível.</span>
+          <button onClick={() => location.reload()} className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-1 text-xs font-semibold text-white hover:bg-slate-800">
+            <RefreshIcon size={13} /> Atualizar agora
+          </button>
+        </div>
+      )}
 
       {loadError && (
         <div className="no-print mx-auto max-w-5xl px-4 pt-4 sm:px-6">
