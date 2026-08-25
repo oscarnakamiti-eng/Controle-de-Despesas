@@ -11,6 +11,40 @@ const TIPO_STYLE = {
   "Materiais e Serviços": "bg-slate-200 text-slate-800 border-slate-400",
 };
 
+// Paleta do gráfico por tipo — cores validadas (contraste, daltonismo) nesta
+// ordem fixa. A ordem é o que garante a segurança: nunca reordenar as barras
+// por valor, senão pares nunca testados como vizinhos podem ficar lado a lado.
+const TIPO_COR = {
+  "Almoço": "#2a78d6",
+  "Jantar": "#eb6834",
+  "Combustível": "#1baf7a",
+  "Hospedagem": "#eda100",
+  "Materiais e Serviços": "#e87ba4",
+};
+
+// Gráfico de barras horizontais com a somatória das despesas por tipo.
+// Mostra sempre os 5 tipos, na mesma ordem — ver comentário de TIPO_COR.
+function GraficoPorTipo({ records }) {
+  const totais = TIPOS.map((tipo) => ({
+    tipo,
+    total: records.reduce((s, r) => (r.tipo === tipo ? s + (Number(r.valor) || 0) : s), 0),
+  }));
+  const maior = Math.max(1, ...totais.map((t) => t.total));
+  return (
+    <div className="space-y-2.5">
+      {totais.map(({ tipo, total }) => (
+        <div key={tipo} className="flex items-center gap-2.5">
+          <span className="w-32 shrink-0 truncate text-xs text-slate-600" title={tipo}>{tipo}</span>
+          <div className="h-3 min-w-0 flex-1 rounded-sm bg-slate-100">
+            <div className="h-3" style={{ width: `${(total / maior) * 100}%`, backgroundColor: TIPO_COR[tipo], borderRadius: "0 3px 3px 0" }} />
+          </div>
+          <span className="w-20 shrink-0 text-right font-mono-num text-xs text-slate-700">{formatValor(total)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Icon({ children, size = 16, className = "", ...props }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -1167,6 +1201,14 @@ function App() {
       {view === "gerar" && (
         <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
           <div className="rounded-lg border border-slate-200 bg-white p-4">
+            <h2 className="font-display text-lg font-bold">Despesas por tipo</h2>
+            <p className="mt-1 text-xs text-slate-500">Somatória de tudo que está na tabela de despesas agora.</p>
+            <div className="mt-3">
+              <GraficoPorTipo records={records} />
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
             <h2 className="font-display text-lg font-bold">Qual é o fluxo?</h2>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <button onClick={() => setFluxo("adiantamento")}
