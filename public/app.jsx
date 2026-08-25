@@ -28,7 +28,26 @@ function functionUrl(nome, query = "") {
 }
 
 const TIPOS = ["Almoço", "Jantar", "Combustível", "Hospedagem", "Materiais e Serviços"];
-const LIMITE_REFEICAO = 35;
+
+// Política padrão por tipo, usada enquanto o solicitante não personaliza nada
+// na aba Cadastros (mantém o comportamento antigo: Almoço/Jantar com teto de
+// 35,00; os demais tipos sem limite até serem ativados).
+const POLITICAS_PADRAO = {
+  "Almoço": { ativo: true, limite: "35,00" },
+  "Jantar": { ativo: true, limite: "35,00" },
+  "Combustível": { ativo: false, limite: "" },
+  "Hospedagem": { ativo: false, limite: "" },
+  "Materiais e Serviços": { ativo: false, limite: "" },
+};
+// Tipos cujo aviso de valor acima da política pergunta "quantas pessoas" e,
+// se houver mais de uma, multiplica o limite por esse número antes de decidir
+// se ainda precisa corrigir o valor.
+const TIPOS_COM_PESSOAS = ["Almoço", "Jantar", "Hospedagem"];
+
+function politicaDoTipo(profile, tipo) {
+  const p = profile && profile.politicas && profile.politicas[tipo];
+  return p || POLITICAS_PADRAO[tipo] || { ativo: false, limite: "" };
+}
 
 const TIPO_STYLE = {
   "Almoço": "bg-amber-100 text-amber-800 border-amber-300",
@@ -612,21 +631,43 @@ function App() {
     }
   }, [filaAvisoLimite, avisoLimite]);
 
+  // Usado pelos tipos com a pergunta "quantas pessoas" (Almoço, Jantar,
+  // Hospedagem): com mais de uma pessoa, o limite da política é multiplicado
+  // por esse número antes de decidir se o valor ainda precisa ser corrigido.
   const confirmarAvisoLimite = (incluirPessoas) => {
-    if (incluirPessoas && avisoLimite.nomes.trim()) {
-      const info = avisoLimite.pessoas
-        ? `Refeição para ${avisoLimite.pessoas} pessoa(s): ${avisoLimite.nomes.trim()}`
-        : `Também para: ${avisoLimite.nomes.trim()}`;
-      setRecords((prev) => prev.map((r) =>
-        r.id === avisoLimite.id ? { ...r, obs: r.obs ? `${r.obs} — ${info}` : info } : r
-      ));
-    } else if (!incluirPessoas) {
+    const rec = records.find((r) => r.id === avisoLimite.id);
+    const limite = rec ? parseValorInput(politicaDoTipo(profile, rec.tipo).limite) : 0;
+    if (incluirPessoas) {
+      const pessoas = parseInt(avisoLimite.pessoas, 10) || 1;
+      const efetivo = limite * pessoas;
+      const info = avisoLimite.nomes.trim()
+        ? (avisoLimite.pessoas ? `Refeição para ${avisoLimite.pessoas} pessoa(s): ${avisoLimite.nomes.trim()}` : `Também para: ${avisoLimite.nomes.trim()}`)
+        : (avisoLimite.pessoas ? `Despesa para ${avisoLimite.pessoas} pessoa(s)` : "");
+      setRecords((prev) => prev.map((r) => {
+        if (r.id !== avisoLimite.id) return r;
+        return {
+          ...r,
+          valor: r.valor > efetivo ? efetivo : r.valor,
+          obs: info ? (r.obs ? `${r.obs} — ${info}` : info) : r.obs,
+        };
+      }));
+    } else {
       // Sem outras pessoas: não se justifica o valor acima do limite —
       // ajusta para o teto permitido.
       setRecords((prev) => prev.map((r) =>
-        r.id === avisoLimite.id ? { ...r, valor: LIMITE_REFEICAO } : r
+        r.id === avisoLimite.id ? { ...r, valor: limite } : r
       ));
     }
+    setAvisoLimite(null);
+  };
+
+  // Usado pelos demais tipos (sem a pergunta de "quantas pessoas"): só
+  // mantém o valor como está ou corrige para o valor da política.
+  const manterAvisoLimite = () => setAvisoLimite(null);
+  const corrigirAvisoLimite = () => {
+    const rec = records.find((r) => r.id === avisoLimite.id);
+    const limite = rec ? parseValorInput(politicaDoTipo(profile, rec.tipo).limite) : 0;
+    setRecords((prev) => prev.map((r) => r.id === avisoLimite.id ? { ...r, valor: limite } : r));
     setAvisoLimite(null);
   };
 
@@ -681,7 +722,9 @@ function App() {
           valor, fileName: file.name, mediaType, hasFile: !!fileStored, pages,
           status: needsReview ? "revisar" : "ok",
         }]);
-        if ((tipo === "Almoço" || tipo === "Jantar") && valor > LIMITE_REFEICAO) {
+        const politicaTipo = politicaDoTipo(profile, tipo);
+        const limitePolitica = parseValorInput(politicaTipo.limite);
+        if (politicaTipo.ativo && limitePolitica > 0 && valor > limitePolitica) {
           setFilaAvisoLimite((prev) => [...prev, recId]);
         }
         if (convErro) {
@@ -695,7 +738,7 @@ function App() {
       }
     }
     setProcessing(false);
-  }, []);
+  }, [profile]);
 
   const onFileInputChange = (e) => { processFiles(e.target.files); e.target.value = ""; };
   const onDrop = (e) => { e.preventDefault(); dropRef.current?.classList.remove("border-amber-500", "bg-amber-50"); processFiles(e.dataTransfer.files); };
@@ -1083,6 +1126,14 @@ function App() {
             <input ref={fileInputRef} type="file" multiple accept="image/*,.pdf" onChange={onFileInputChange} className="hidden" />
           </div>
 
+          <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
+            <h2 className="font-display text-lg font-bold">Despesas por tipo</h2>
+            <p className="mt-1 text-xs text-slate-500">Somatória de tudo que está na tabela de despesas agora.</p>
+            <div className="mt-3">
+              <GraficoPorTipo records={records} />
+            </div>
+          </div>
+
           {queue.length > 0 && (
             <div className="no-print mt-4 rounded-lg border border-slate-200 bg-white p-3">
               <div className="mb-2 flex items-center justify-between">
@@ -1176,7 +1227,9 @@ function App() {
                   <Fragment key={w.monday.getTime()}>
                     <tr><td colSpan={6} className="bg-slate-800 px-3 py-1.5 font-display text-xs uppercase tracking-wide text-amber-300">Semana de {w.label}</td></tr>
                     {w.rows.map((r) => {
-                      const overLimit = (r.tipo === "Almoço" || r.tipo === "Jantar") && r.valor > LIMITE_REFEICAO;
+                      const politicaLinha = politicaDoTipo(profile, r.tipo);
+                      const limitePoliticaLinha = parseValorInput(politicaLinha.limite);
+                      const overLimit = politicaLinha.ativo && limitePoliticaLinha > 0 && r.valor > limitePoliticaLinha;
                       if (editingId === r.id && editDraft) {
                         return <EditRow key={r.id} draft={editDraft} setDraft={setEditDraft} onSave={() => saveEdit(r.id)} onCancel={() => { setEditingId(null); setEditDraft(null); }} />;
                       }
@@ -1196,7 +1249,7 @@ function App() {
                           </td>
                           <td className="px-3 py-2 text-slate-600">
                             {r.obs || <span className="text-slate-300">—</span>}
-                            {overLimit && <div className="mt-0.5 text-xs text-red-600">Acima do limite de {formatValor(LIMITE_REFEICAO)}</div>}
+                            {overLimit && <div className="mt-0.5 text-xs text-red-600">Acima do limite de {formatValor(limitePoliticaLinha)}</div>}
                           </td>
                           <td className="whitespace-nowrap px-3 py-2 text-right font-mono-num">{formatValor(r.valor)}</td>
                           <td className="no-print whitespace-nowrap px-3 py-2">
@@ -1240,14 +1293,6 @@ function App() {
       {view === "gerar" && (
         <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
           <div className="rounded-lg border border-slate-200 bg-white p-4">
-            <h2 className="font-display text-lg font-bold">Despesas por tipo</h2>
-            <p className="mt-1 text-xs text-slate-500">Somatória de tudo que está na tabela de despesas agora.</p>
-            <div className="mt-3">
-              <GraficoPorTipo records={records} />
-            </div>
-          </div>
-
-          <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
             <h2 className="font-display text-lg font-bold">Qual é o fluxo?</h2>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <button onClick={() => setFluxo("adiantamento")}
@@ -1377,6 +1422,43 @@ function App() {
             </div>
             <button onClick={saveProfile} className="mt-4 inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
               <CheckIcon size={16} /> Salvar dados do solicitante
+            </button>
+          </div>
+
+          <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
+            <h2 className="font-display text-lg font-bold">Políticas</h2>
+            <p className="mt-1 text-xs text-slate-500">Valor limite por lançamento, por tipo de despesa. Acima do limite, o app pede confirmação (ou correção) na hora de lançar.</p>
+            <div className="mt-3 space-y-2">
+              {TIPOS.map((tipo) => {
+                const politica = politicaDoTipo(profile, tipo);
+                return (
+                  <div key={tipo} className="flex items-center gap-3 rounded border border-slate-200 px-3 py-2">
+                    <button
+                      type="button" role="switch" aria-checked={politica.ativo}
+                      onClick={() => setProfile({ ...profile, politicas: { ...profile.politicas, [tipo]: { ...politica, ativo: !politica.ativo } } })}
+                      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${politica.ativo ? "bg-amber-500" : "bg-slate-300"}`}>
+                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${politica.ativo ? "translate-x-4" : "translate-x-0.5"}`} />
+                    </button>
+                    <span className="w-40 shrink-0 text-sm text-slate-700">{tipo}</span>
+                    {politica.ativo ? (
+                      <input
+                        value={politica.limite}
+                        onChange={(e) => setProfile({ ...profile, politicas: { ...profile.politicas, [tipo]: { ...politica, limite: e.target.value } } })}
+                        onBlur={() => setProfile((prev) => {
+                          const atual = politicaDoTipo(prev, tipo);
+                          return { ...prev, politicas: { ...prev.politicas, [tipo]: { ...atual, limite: formatValor(parseValorInput(atual.limite)) } } };
+                        })}
+                        placeholder="0,00" inputMode="decimal"
+                        className="w-28 rounded border border-slate-300 px-2 py-1 text-right text-sm font-mono-num" />
+                    ) : (
+                      <span className="text-xs text-slate-400">Sem limite</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <button onClick={saveProfile} className="mt-4 inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
+              <CheckIcon size={16} /> Salvar políticas
             </button>
           </div>
 
@@ -1514,25 +1596,37 @@ function App() {
       {avisoLimite && (() => {
         const rec = records.find((r) => r.id === avisoLimite.id);
         if (!rec) return null;
+        const limite = parseValorInput(politicaDoTipo(profile, rec.tipo).limite);
+        const comPessoas = TIPOS_COM_PESSOAS.includes(rec.tipo);
         return (
           <div className="no-print fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
             <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl">
               <div className="flex items-center gap-2 text-amber-700">
                 <AlertIcon size={20} />
-                <h3 className="font-display text-base font-bold">Valor acima do limite</h3>
+                <h3 className="font-display text-base font-bold">Valor acima da política</h3>
               </div>
               <p className="mt-2 text-sm text-slate-600">
                 {rec.tipo} de {rec.data} no valor de <span className="font-mono-num font-semibold">{formatValor(rec.valor)}</span> está
-                acima do limite de {formatValor(LIMITE_REFEICAO)}. Essa despesa inclui mais de uma pessoa?
+                acima da política de {formatValor(limite)} para {rec.tipo}.
+                {comPessoas ? " Essa despesa inclui mais de uma pessoa?" : " Deseja manter o valor ou alterar para o valor da política?"}
               </p>
-              <div className="mt-3 space-y-2">
-                <Field label="Quantas pessoas" value={avisoLimite.pessoas} onChange={(v) => setAvisoLimite({ ...avisoLimite, pessoas: v })} placeholder="Ex.: 3" />
-                <Field label="Nomes das pessoas" value={avisoLimite.nomes} onChange={(v) => setAvisoLimite({ ...avisoLimite, nomes: v })} placeholder="Ex.: João, Maria" />
-              </div>
-              <div className="mt-4 flex justify-end gap-2">
-                <button onClick={() => confirmarAvisoLimite(false)} className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Não — ajustar para {formatValor(LIMITE_REFEICAO)}</button>
-                <button onClick={() => confirmarAvisoLimite(true)} className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800">Registrar pessoas</button>
-              </div>
+              {comPessoas ? (
+                <>
+                  <div className="mt-3 space-y-2">
+                    <Field label="Quantas pessoas" value={avisoLimite.pessoas} onChange={(v) => setAvisoLimite({ ...avisoLimite, pessoas: v })} placeholder="Ex.: 3" />
+                    <Field label="Nomes das pessoas" value={avisoLimite.nomes} onChange={(v) => setAvisoLimite({ ...avisoLimite, nomes: v })} placeholder="Ex.: João, Maria" />
+                  </div>
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button onClick={() => confirmarAvisoLimite(false)} className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Não — ajustar para {formatValor(limite)}</button>
+                    <button onClick={() => confirmarAvisoLimite(true)} className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800">Registrar pessoas</button>
+                  </div>
+                </>
+              ) : (
+                <div className="mt-4 flex justify-end gap-2">
+                  <button onClick={manterAvisoLimite} className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Manter valor</button>
+                  <button onClick={corrigirAvisoLimite} className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800">Alterar para {formatValor(limite)}</button>
+                </div>
+              )}
             </div>
           </div>
         );
