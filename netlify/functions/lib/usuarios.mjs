@@ -76,6 +76,10 @@ export async function vincularLogin(nome, codigo) {
   await storeAdmin().set(chaveLogin(nome), codigo);
 }
 
+export async function removerLogin(nome) {
+  await storeAdmin().delete(chaveLogin(nome));
+}
+
 export function gerarCodigo() {
   return crypto.randomBytes(18).toString("base64url");
 }
