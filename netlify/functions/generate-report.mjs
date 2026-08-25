@@ -12,6 +12,8 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import { getStore } from "@netlify/blobs";
+import { resolverUsuario } from "./lib/usuarios.mjs";
+import { chaveAssinatura, chaveAssinaturaMeta } from "./assinatura.mjs";
 
 const TEMPLATES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "templates");
 
@@ -161,6 +163,8 @@ function injetarAssinatura(arquivos, nomeSheet, xml, linha, assinatura) {
 
 export default async (req) => {
   if (req.method !== "POST") return json({ error: "Método não permitido" }, 405);
+  let userId;
+  try { userId = await resolverUsuario(req); } catch (err) { return json({ error: err.message }, err.status || 403); }
 
   let body;
   try { body = await req.json(); } catch { return json({ error: "Corpo da requisição inválido" }, 400); }
@@ -253,9 +257,9 @@ export default async (req) => {
     if (tier.assinaturaRow) {
       try {
         const store = getStore("expense-tracker");
-        const assinaturaBuf = await store.get("assinatura", { type: "arrayBuffer" });
+        const assinaturaBuf = await store.get(chaveAssinatura(userId), { type: "arrayBuffer" });
         if (assinaturaBuf) {
-          const meta = (await store.get("assinatura-meta", { type: "json" })) || {};
+          const meta = (await store.get(chaveAssinaturaMeta(userId), { type: "json" })) || {};
           if (meta.width && meta.height) {
             xml = injetarAssinatura(arquivos, nomeSheet, xml, tier.assinaturaRow, {
               bytes: new Uint8Array(assinaturaBuf), mediaType: meta.mediaType, width: meta.width, height: meta.height,

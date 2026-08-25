@@ -1,5 +1,32 @@
 const { useState, useEffect, useRef, useCallback, Fragment } = React;
 
+// Cada pessoa acessa por um link próprio (?u=<codigo>) que identifica os
+// dados dela sem precisar de login. Guardamos o código no localStorage na
+// primeira visita e removemos da URL, pra não ficar exposto se a página for
+// recarregada/compartilhada por engano.
+const CHAVE_CODIGO_LOCAL = "despesas_codigo_usuario";
+function resolverCodigoUsuario() {
+  const params = new URLSearchParams(location.search);
+  const daUrl = params.get("u");
+  if (daUrl) {
+    localStorage.setItem(CHAVE_CODIGO_LOCAL, daUrl);
+    params.delete("u");
+    const resto = params.toString();
+    history.replaceState(null, "", location.pathname + (resto ? `?${resto}` : ""));
+    return daUrl;
+  }
+  return localStorage.getItem(CHAVE_CODIGO_LOCAL) || null;
+}
+const CODIGO_USUARIO = resolverCodigoUsuario();
+// O código sempre vai como query string (nunca header), porque também é
+// usado em <img src> e links diretos (comprovantes, assinatura), que não
+// conseguem levar header nenhum.
+function functionUrl(nome, query = "") {
+  const codigoParam = CODIGO_USUARIO ? `codigo=${encodeURIComponent(CODIGO_USUARIO)}` : "";
+  const qs = [query, codigoParam].filter(Boolean).join("&");
+  return `/.netlify/functions/${nome}${qs ? `?${qs}` : ""}`;
+}
+
 const TIPOS = ["Almoço", "Jantar", "Combustível", "Hospedagem", "Materiais e Serviços"];
 const LIMITE_REFEICAO = 35;
 
@@ -198,7 +225,7 @@ async function comprimirAssinatura(file, maxDim = 500, quality = 0.92) {
   return { base64, mediaType: "image/jpeg", width: w, height: h };
 }
 function makeId() { return `rec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; }
-function fileUrl(id) { return `/.netlify/functions/files?id=${encodeURIComponent(id)}`; }
+function fileUrl(id) { return functionUrl("files", `id=${encodeURIComponent(id)}`); }
 function previewUrl(id, page) { return `${fileUrl(id)}&preview=${page}`; }
 
 // Converte cada página de um PDF em JPEG (via pdf.js) e envia ao servidor,
@@ -223,7 +250,7 @@ async function converterPdfEmImagens(id, base64, onProgress) {
     canvas.height = viewport.height;
     await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
     const jpeg = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
-    const res = await fetch("/.netlify/functions/upload-preview", {
+    const res = await fetch(functionUrl("upload-preview"), {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, page: n, base64: jpeg }),
     });
@@ -254,17 +281,17 @@ async function parseJsonResponse(res) {
 }
 
 async function apiGet(fn) {
-  const res = await fetch(`/.netlify/functions/${fn}`);
+  const res = await fetch(functionUrl(fn));
   return parseJsonResponse(res);
 }
 async function apiPost(fn, payload) {
-  const res = await fetch(`/.netlify/functions/${fn}`, {
+  const res = await fetch(functionUrl(fn), {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
   });
   return parseJsonResponse(res);
 }
 async function callExtract(id, base64, mediaType, isPdf, fileName) {
-  const res = await fetch("/.netlify/functions/extract", {
+  const res = await fetch(functionUrl("extract"), {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id, base64, mediaType, isPdf, fileName }),
   });
@@ -477,6 +504,7 @@ function App() {
   const [gerando, setGerando] = useState(false);
 
   useEffect(() => {
+    if (!CODIGO_USUARIO) { setLoaded(true); return; }
     (async () => {
       try {
         const [r, p, rp, rc] = await Promise.all([apiGet("records"), apiGet("profile"), apiGet("rateio"), apiGet("rascunho")]);
@@ -529,7 +557,7 @@ function App() {
       do {
         pendenteRef.current = false;
         try {
-          const res = await fetch("/.netlify/functions/records", {
+          const res = await fetch(functionUrl("records"), {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ records: recordsRef.current, etag: recordsEtagRef.current }),
           });
@@ -764,7 +792,7 @@ function App() {
   const removerAssinatura = async () => {
     if (!window.confirm("Remover a assinatura salva?")) return;
     try {
-      await fetch("/.netlify/functions/assinatura", { method: "DELETE" });
+      await fetch(functionUrl("assinatura"), { method: "DELETE" });
       setTemAssinatura(false);
       showToast("Assinatura removida.");
     } catch (e) {
@@ -869,7 +897,7 @@ function App() {
     const itensPrevisoes = isAdiantamentoReq ? previsoes.map((p) => ({ obs: p.obs, valor: parseValorInput(p.valor) })) : [];
 
     try {
-      const res = await fetch("/.netlify/functions/generate-report", {
+      const res = await fetch(functionUrl("generate-report"), {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tipo, profile, motivo, rateio: flattenRateio(rateio),
@@ -888,7 +916,7 @@ function App() {
       let avisoConversao = null;
       if (!isAdiantamentoReq && reportPages.length > 0) {
         try {
-          const resPdf = await fetch("/.netlify/functions/generate-photo-report", {
+          const resPdf = await fetch(functionUrl("generate-photo-report"), {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               xlsxBase64: uint8ParaBase64(xlsxBytes),
@@ -975,6 +1003,17 @@ function App() {
     }
   });
   const totalPrevisto = previsoes.reduce((s, p) => s + parseValorInput(p.valor), 0);
+
+  if (!CODIGO_USUARIO) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-stone-100 px-4 text-center">
+        <div className="max-w-sm rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <h1 className="font-display text-lg font-bold text-slate-800">Link de acesso inválido ou ausente</h1>
+          <p className="mt-2 text-sm text-slate-500">Peça um novo link de acesso ao administrador do aplicativo.</p>
+        </div>
+      </div>
+    );
+  }
 
   const NavBtn = ({ id, children }) => (
     <button onClick={() => setView(id)}
@@ -1350,7 +1389,7 @@ function App() {
                   <span className="text-center text-xs text-slate-400">Nenhuma assinatura cadastrada</span>
                 ) : (
                   <img
-                    src={`/.netlify/functions/assinatura?v=${assinaturaVersao}`}
+                    src={functionUrl("assinatura", `v=${assinaturaVersao}`)}
                     alt="Assinatura"
                     className="max-h-full max-w-full object-contain"
                     onLoad={() => setTemAssinatura(true)}

@@ -1,20 +1,30 @@
 // Netlify Function (v2) — guarda a imagem da assinatura do solicitante, usada
 // para preencher automaticamente o campo de assinatura nas planilhas oficiais.
-// GET    -> serve a imagem (para pré-visualização)
+// GET    ?codigo=<codigo>          -> serve a imagem (para pré-visualização)
 // POST   { base64, mediaType, width, height } -> grava/substitui a assinatura
-// DELETE -> remove a assinatura salva
+// DELETE ?codigo=<codigo>          -> remove a assinatura salva
 
 import { getStore } from "@netlify/blobs";
+import { resolverUsuario, chave } from "./lib/usuarios.mjs";
 
-const KEY = "assinatura";
-const META_KEY = "assinatura-meta";
+export function chaveAssinatura(userId) {
+  return chave(userId, "assinatura");
+}
+export function chaveAssinaturaMeta(userId) {
+  return chave(userId, "assinatura-meta");
+}
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
 export default async (req) => {
+  let userId;
+  try { userId = await resolverUsuario(req); } catch (err) { return json({ error: err.message }, err.status || 403); }
+
   const store = getStore("expense-tracker");
+  const KEY = chaveAssinatura(userId);
+  const META_KEY = chaveAssinaturaMeta(userId);
 
   if (req.method === "GET") {
     const buffer = await store.get(KEY, { type: "arrayBuffer" });

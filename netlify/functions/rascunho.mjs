@@ -7,14 +7,16 @@
 // POST -> recebe { rascunho: {...} } e substitui o conteúdo salvo
 
 import { getStore } from "@netlify/blobs";
-
-const KEY = "rascunho";
+import { resolverUsuario, chave } from "./lib/usuarios.mjs";
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
 export default async (req) => {
+  let userId;
+  try { userId = await resolverUsuario(req); } catch (err) { return json({ error: err.message }, err.status || 403); }
+  const KEY = chave(userId, "rascunho");
   const store = getStore("expense-tracker");
 
   if (req.method === "GET") {
