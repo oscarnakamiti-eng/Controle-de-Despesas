@@ -53,6 +53,29 @@ export async function listarUsuarios() {
   return usuarios;
 }
 
+// Login por nome: em vez de compartilhar um link, a pessoa digita o próprio
+// nome e recebe de volta o mesmo "codigo" que os links usavam — o resto do
+// isolamento por usuário (chave por userId, revogação, etc.) continua
+// idêntico, só muda como o código chega até o navegador da pessoa.
+const PREFIXO_LOGIN = "_admin:login:";
+
+export function normalizarNome(nome) {
+  return String(nome || "").trim().toLowerCase();
+}
+
+function chaveLogin(nome) {
+  return `${PREFIXO_LOGIN}${normalizarNome(nome)}`;
+}
+
+export async function buscarCodigoPorNome(nome) {
+  if (!normalizarNome(nome)) return null;
+  return await storeAdmin().get(chaveLogin(nome), { type: "text" });
+}
+
+export async function vincularLogin(nome, codigo) {
+  await storeAdmin().set(chaveLogin(nome), codigo);
+}
+
 export function gerarCodigo() {
   return crypto.randomBytes(18).toString("base64url");
 }

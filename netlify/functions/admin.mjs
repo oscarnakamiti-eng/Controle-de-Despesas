@@ -10,7 +10,7 @@
 //   curl -u "$SITE_USER:$SITE_PASSWORD" -H "x-admin-token: $ADMIN_TOKEN" \
 //     -X POST https://SEUSITE/.netlify/functions/admin -d '{"acao":"criar","nome":"Maria"}'
 
-import { autenticadoAdmin, listarUsuarios, buscarUsuarioPorCodigo, gravarUsuario, gerarCodigo, gerarUserId } from "./lib/usuarios.mjs";
+import { autenticadoAdmin, listarUsuarios, buscarUsuarioPorCodigo, gravarUsuario, gerarCodigo, gerarUserId, buscarCodigoPorNome, vincularLogin } from "./lib/usuarios.mjs";
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -34,9 +34,17 @@ export default async (req) => {
     if (acao === "criar") {
       const nome = String(body.nome || "").trim();
       if (!nome) return json({ error: "Informe o nome da pessoa." }, 400);
+      const existente = await buscarCodigoPorNome(nome);
+      if (existente) {
+        const registroExistente = await buscarUsuarioPorCodigo(existente);
+        if (registroExistente && !registroExistente.revogado) {
+          return json({ error: "Já existe uma pessoa ativa com esse nome de usuário." }, 409);
+        }
+      }
       const codigo = gerarCodigo();
       const userId = gerarUserId();
       await gravarUsuario(codigo, { userId, nome, criadoEm: new Date().toISOString(), revogado: false });
+      await vincularLogin(nome, codigo);
       return json({ codigo, userId, link: `/?u=${codigo}` });
     }
 
@@ -57,6 +65,7 @@ export default async (req) => {
       await gravarUsuario(codigoAntigo, registro);
       const novoCodigo = gerarCodigo();
       await gravarUsuario(novoCodigo, { userId: registro.userId, nome: registro.nome, criadoEm: registro.criadoEm, revogado: false });
+      await vincularLogin(registro.nome, novoCodigo);
       return json({ codigo: novoCodigo, userId: registro.userId, link: `/?u=${novoCodigo}` });
     }
 

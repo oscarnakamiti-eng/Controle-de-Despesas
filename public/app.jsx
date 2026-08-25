@@ -530,6 +530,29 @@ function App() {
   const assinaturaInputRef = useRef(null);
   const dropRef = useRef(null);
 
+  // login por nome (sem senha — a senha do site inteiro já é a barreira)
+  const [loginNome, setLoginNome] = useState("");
+  const [loginCarregando, setLoginCarregando] = useState(false);
+  const [loginErro, setLoginErro] = useState(null);
+  const fazerLogin = async (e) => {
+    e.preventDefault();
+    const nome = loginNome.trim();
+    if (!nome) return;
+    setLoginCarregando(true);
+    setLoginErro(null);
+    try {
+      const res = await fetch(functionUrl("login"), {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nome }),
+      });
+      const data = await parseJsonResponse(res);
+      localStorage.setItem(CHAVE_CODIGO_LOCAL, data.codigo);
+      location.reload();
+    } catch (err) {
+      setLoginErro(String(err.message || err));
+      setLoginCarregando(false);
+    }
+  };
+
   // formulário de geração
   const [fluxo, setFluxo] = useState("reembolso"); // "adiantamento" | "reembolso"
   const [motivo, setMotivo] = useState("");
@@ -1091,10 +1114,18 @@ function App() {
   if (!CODIGO_USUARIO) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-stone-100 px-4 text-center">
-        <div className="max-w-sm rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-          <h1 className="font-display text-lg font-bold text-slate-800">Link de acesso inválido ou ausente</h1>
-          <p className="mt-2 text-sm text-slate-500">Peça um novo link de acesso ao administrador do aplicativo.</p>
-        </div>
+        <form onSubmit={fazerLogin} className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-6 text-left shadow-sm">
+          <h1 className="text-center font-display text-lg font-bold text-slate-800">Despesas de Viagem</h1>
+          <p className="mt-1 text-center text-xs text-slate-500">Digite seu nome de usuário para entrar.</p>
+          <div className="mt-4">
+            <Field label="Usuário" value={loginNome} onChange={setLoginNome} placeholder="Seu nome" />
+          </div>
+          {loginErro && <p className="mt-2 text-xs text-red-600">{loginErro}</p>}
+          <button type="submit" disabled={loginCarregando || !loginNome.trim()}
+            className="mt-4 w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">
+            {loginCarregando ? "Entrando…" : "Entrar"}
+          </button>
+        </form>
       </div>
     );
   }
@@ -1132,6 +1163,8 @@ function App() {
             <div className="text-right">
               <p className="text-xs uppercase tracking-wide text-slate-400">Total acumulado</p>
               <p className="font-mono-num text-2xl font-semibold text-amber-400 sm:text-3xl">{formatValor(totalGeral)}</p>
+              <button onClick={() => { localStorage.removeItem(CHAVE_CODIGO_LOCAL); location.reload(); }}
+                className="mt-1 text-xs text-slate-400 underline hover:text-slate-200">Trocar de usuário</button>
             </div>
           </div>
           <nav className="mt-4 flex flex-nowrap gap-0.5 sm:gap-1">
