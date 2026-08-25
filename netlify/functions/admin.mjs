@@ -10,7 +10,7 @@
 //   curl -u "$SITE_USER:$SITE_PASSWORD" -H "x-admin-token: $ADMIN_TOKEN" \
 //     -X POST https://SEUSITE/.netlify/functions/admin -d '{"acao":"criar","nome":"Maria"}'
 
-import { autenticadoAdmin, lerIndice, gravarIndice, gerarCodigo, gerarUserId } from "./lib/usuarios.mjs";
+import { autenticadoAdmin, listarUsuarios, buscarUsuarioPorCodigo, gravarUsuario, gerarCodigo, gerarUserId } from "./lib/usuarios.mjs";
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -22,14 +22,7 @@ export default async (req) => {
   }
 
   if (req.method === "GET") {
-    const indice = await lerIndice();
-    const usuarios = Object.entries(indice).map(([codigo, u]) => ({
-      codigo,
-      userId: u.userId,
-      nome: u.nome,
-      criadoEm: u.criadoEm,
-      revogado: !!u.revogado,
-    }));
+    const usuarios = await listarUsuarios();
     return json({ usuarios });
   }
 
@@ -41,32 +34,29 @@ export default async (req) => {
     if (acao === "criar") {
       const nome = String(body.nome || "").trim();
       if (!nome) return json({ error: "Informe o nome da pessoa." }, 400);
-      const indice = await lerIndice();
       const codigo = gerarCodigo();
       const userId = gerarUserId();
-      indice[codigo] = { userId, nome, criadoEm: new Date().toISOString(), revogado: false };
-      await gravarIndice(indice);
+      await gravarUsuario(codigo, { userId, nome, criadoEm: new Date().toISOString(), revogado: false });
       return json({ codigo, userId, link: `/?u=${codigo}` });
     }
 
     if (acao === "revogar") {
       const codigo = String(body.codigo || "");
-      const indice = await lerIndice();
-      if (!indice[codigo]) return json({ error: "Código não encontrado." }, 404);
-      indice[codigo].revogado = true;
-      await gravarIndice(indice);
+      const registro = await buscarUsuarioPorCodigo(codigo);
+      if (!registro) return json({ error: "Código não encontrado." }, 404);
+      registro.revogado = true;
+      await gravarUsuario(codigo, registro);
       return json({ ok: true });
     }
 
     if (acao === "regenerar") {
       const codigoAntigo = String(body.codigo || "");
-      const indice = await lerIndice();
-      const registro = indice[codigoAntigo];
+      const registro = await buscarUsuarioPorCodigo(codigoAntigo);
       if (!registro) return json({ error: "Código não encontrado." }, 404);
       registro.revogado = true;
+      await gravarUsuario(codigoAntigo, registro);
       const novoCodigo = gerarCodigo();
-      indice[novoCodigo] = { userId: registro.userId, nome: registro.nome, criadoEm: registro.criadoEm, revogado: false };
-      await gravarIndice(indice);
+      await gravarUsuario(novoCodigo, { userId: registro.userId, nome: registro.nome, criadoEm: registro.criadoEm, revogado: false });
       return json({ codigo: novoCodigo, userId: registro.userId, link: `/?u=${novoCodigo}` });
     }
 

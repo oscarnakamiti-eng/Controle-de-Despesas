@@ -6,27 +6,51 @@
 // codigo: token público, vai na URL, pode ser revogado/trocado.
 // userId: interno, nunca aparece na URL, nunca muda — é o que garante que
 // regenerar o link de alguém não perde os dados dela.
+//
+// Cada usuário fica na SUA PRÓPRIA chave (_admin:usuario:<codigo>), não num
+// índice único compartilhado — um índice único exigiria ler-modificar-escrever
+// o objeto inteiro a cada criação/revogação, e o Netlify Blobs não tem
+// compare-and-swap, então duas criações próximas no tempo podiam se
+// sobrescrever (confirmado na prática: criar A e depois B fez B substituir A
+// inteiro, porque a escrita de B partiu de uma leitura que ainda não via A).
+// Com uma chave por usuário, criar/revogar uma pessoa nunca mexe na chave de
+// outra.
 
 import { getStore } from "@netlify/blobs";
 import crypto from "crypto";
 
 export const STORE_NOME = "expense-tracker";
-const INDICE_KEY = "_admin:usuarios";
+const PREFIXO_USUARIO = "_admin:usuario:";
 
 // Consistência forte: uma revogação ou um código recém-criado precisam
 // valer imediatamente (mesmo motivo já usado em records.mjs/extract.mjs) —
 // senão dá pra usar um código revogado por alguns segundos, ou um código
 // novinho dá "não encontrado" por propagação atrasada.
-function storeIndice() {
+function storeAdmin() {
   return getStore(STORE_NOME, { consistency: "strong" });
 }
 
-export async function lerIndice() {
-  return (await storeIndice().get(INDICE_KEY, { type: "json" })) || {};
+function chaveUsuario(codigo) {
+  return `${PREFIXO_USUARIO}${codigo}`;
 }
 
-export async function gravarIndice(indice) {
-  await storeIndice().setJSON(INDICE_KEY, indice);
+export async function buscarUsuarioPorCodigo(codigo) {
+  return await storeAdmin().get(chaveUsuario(codigo), { type: "json" });
+}
+
+export async function gravarUsuario(codigo, registro) {
+  await storeAdmin().setJSON(chaveUsuario(codigo), registro);
+}
+
+export async function listarUsuarios() {
+  const store = storeAdmin();
+  const { blobs } = await store.list({ prefix: PREFIXO_USUARIO });
+  const usuarios = [];
+  for (const { key } of blobs) {
+    const registro = await store.get(key, { type: "json" });
+    if (registro) usuarios.push({ codigo: key.slice(PREFIXO_USUARIO.length), ...registro });
+  }
+  return usuarios;
 }
 
 export function gerarCodigo() {
@@ -56,8 +80,7 @@ export async function resolverUsuario(req) {
   if (!codigo) {
     throw new ErroAcesso("Link de acesso ausente. Peça um novo link ao administrador.", 401);
   }
-  const indice = await lerIndice();
-  const registro = indice[codigo];
+  const registro = await buscarUsuarioPorCodigo(codigo);
   if (!registro || registro.revogado) {
     throw new ErroAcesso("Link de acesso inválido ou revogado. Peça um novo link ao administrador.", 403);
   }
