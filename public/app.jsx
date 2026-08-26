@@ -1528,7 +1528,11 @@ function App() {
                       type="button" role="switch" aria-checked={politica.ativo}
                       onClick={() => setProfile({ ...profile, politicas: { ...profile.politicas, [tipo]: { ...politica, ativo: !politica.ativo } } })}
                       className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${politica.ativo ? "bg-amber-500" : "bg-slate-300"}`}>
-                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${politica.ativo ? "translate-x-4" : "translate-x-0.5"}`} />
+                      {/* left-0.5 é obrigatório: sem ancorar à esquerda, o
+                          navegador usa a posição estática, que num <button>
+                          (text-align: center por padrão) cai no meio do
+                          trilho e joga a bolinha para fora dele. */}
+                      <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${politica.ativo ? "translate-x-4" : "translate-x-0"}`} />
                     </button>
                     <span className="min-w-0 flex-1 truncate text-sm text-slate-700" title={tipo}>{tipo}</span>
                     {politica.ativo ? (
