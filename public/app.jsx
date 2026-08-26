@@ -509,6 +509,7 @@ function App() {
   const [records, setRecords] = useState([]);
   const [recordsEtag, setRecordsEtag] = useState(null);
   const [profile, setProfile] = useState({});
+  const [usuarioNome, setUsuarioNome] = useState("");
   const [presets, setPresets] = useState([]);
   const [assinaturaVersao, setAssinaturaVersao] = useState(0);
   const [temAssinatura, setTemAssinatura] = useState(null); // null = ainda não sabe
@@ -569,6 +570,7 @@ function App() {
         setRecords(r.records || []);
         setRecordsEtag(r.etag ?? null);
         setProfile(p.profile || {});
+        setUsuarioNome(p.usuario || "");
         setPresets(rp.presets || []);
         const rascunho = rc.rascunho || {};
         setMotivo(rascunho.motivo || "");
@@ -1154,7 +1156,15 @@ function App() {
       `}</style>
 
       <header className="no-print bg-slate-900 text-white">
-        <div className="mx-auto max-w-5xl px-4 py-5 sm:px-6">
+        <div className="mx-auto max-w-5xl px-4 py-4 sm:px-6 sm:py-5">
+          <div className="mb-3 flex justify-end">
+            <button onClick={() => { localStorage.removeItem(CHAVE_CODIGO_LOCAL); location.reload(); }}
+              title="Sair / trocar de usuário"
+              className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-slate-700 px-2.5 py-1 text-xs text-slate-300 transition-colors hover:border-slate-500 hover:text-white">
+              <UserIcon size={13} className="shrink-0" />
+              <span className="truncate">{usuarioNome || "—"}</span>
+            </button>
+          </div>
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
               <p className="font-display text-xs uppercase tracking-[0.2em] text-amber-400">FORM 189 · Grupo Tangipar</p>
@@ -1163,8 +1173,6 @@ function App() {
             <div className="text-right">
               <p className="text-xs uppercase tracking-wide text-slate-400">Total acumulado</p>
               <p className="font-mono-num text-2xl font-semibold text-amber-400 sm:text-3xl">{formatValor(totalGeral)}</p>
-              <button onClick={() => { localStorage.removeItem(CHAVE_CODIGO_LOCAL); location.reload(); }}
-                className="mt-1 text-xs text-slate-400 underline hover:text-slate-200">Trocar de usuário</button>
             </div>
           </div>
           <nav className="mt-4 flex flex-nowrap gap-0.5 sm:gap-1">
@@ -1522,7 +1530,7 @@ function App() {
                       className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${politica.ativo ? "bg-amber-500" : "bg-slate-300"}`}>
                       <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${politica.ativo ? "translate-x-4" : "translate-x-0.5"}`} />
                     </button>
-                    <span className="w-40 shrink-0 text-sm text-slate-700">{tipo}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm text-slate-700" title={tipo}>{tipo}</span>
                     {politica.ativo ? (
                       <input
                         value={politica.limite}
@@ -1532,9 +1540,9 @@ function App() {
                           return { ...prev, politicas: { ...prev.politicas, [tipo]: { ...atual, limite: formatValor(parseValorInput(atual.limite)) } } };
                         })}
                         placeholder="0,00" inputMode="decimal"
-                        className="w-28 rounded border border-slate-300 px-2 py-1 text-right text-sm font-mono-num" />
+                        className="w-24 shrink-0 rounded border border-slate-300 px-2 py-1 text-right text-sm font-mono-num sm:w-28" />
                     ) : (
-                      <span className="text-xs text-slate-400">Sem limite</span>
+                      <span className="shrink-0 text-xs text-slate-400">Sem limite</span>
                     )}
                   </div>
                 );

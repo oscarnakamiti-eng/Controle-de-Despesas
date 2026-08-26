@@ -99,19 +99,25 @@ class ErroAcesso extends Error {
   }
 }
 
-// Lê ?codigo= da URL da requisição e resolve o userId correspondente.
+// Lê ?codigo= da URL da requisição e resolve o cadastro correspondente.
 // Lança erro (com .status) se o código estiver ausente, inválido ou revogado
 // — nunca cai em nenhum dado "padrão" por omissão.
-export async function resolverUsuario(req) {
+export async function resolverRegistro(req) {
   const codigo = new URL(req.url).searchParams.get("codigo");
   if (!codigo) {
-    throw new ErroAcesso("Link de acesso ausente. Peça um novo link ao administrador.", 401);
+    throw new ErroAcesso("Acesso ausente. Entre com seu nome de usuário.", 401);
   }
   const registro = await buscarUsuarioPorCodigo(codigo);
   if (!registro || registro.revogado) {
-    throw new ErroAcesso("Link de acesso inválido ou revogado. Peça um novo link ao administrador.", 403);
+    throw new ErroAcesso("Acesso inválido ou desativado. Fale com o administrador.", 403);
   }
-  return registro.userId;
+  return registro;
+}
+
+// Atalho para quem só precisa saber de quem são os dados (a maioria das
+// funções) — o userId é o prefixo de toda chave no Blobs.
+export async function resolverUsuario(req) {
+  return (await resolverRegistro(req)).userId;
 }
 
 // Autenticação própria do admin, independente do login por nome — quem sabe

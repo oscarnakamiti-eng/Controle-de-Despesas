@@ -5,21 +5,24 @@
 // POST -> recebe { profile: {...} } e substitui o conteúdo salvo
 
 import { getStore } from "@netlify/blobs";
-import { resolverUsuario, chave } from "./lib/usuarios.mjs";
+import { resolverRegistro, chave } from "./lib/usuarios.mjs";
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
 export default async (req) => {
-  let userId;
-  try { userId = await resolverUsuario(req); } catch (err) { return json({ error: err.message }, err.status || 403); }
+  let registro;
+  try { registro = await resolverRegistro(req); } catch (err) { return json({ error: err.message }, err.status || 403); }
+  const userId = registro.userId;
   const KEY = chave(userId, "profile");
   const store = getStore("expense-tracker");
 
   if (req.method === "GET") {
     const profile = (await store.get(KEY, { type: "json" })) || {};
-    return json({ profile });
+    // Devolve também o nome de login, pro app mostrar quem está conectado
+    // (funciona pra quem entrou pelo login e pra quem já tinha o acesso salvo).
+    return json({ profile, usuario: registro.nome || "" });
   }
 
   if (req.method === "POST") {
