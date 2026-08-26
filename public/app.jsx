@@ -599,7 +599,7 @@ function App() {
   const [previsoes, setPrevisoes] = useState([]);
   const [gerando, setGerando] = useState(false);
   const [gerandoPreview, setGerandoPreview] = useState(null); // tipo em geração
-  const [previewPdf, setPreviewPdf] = useState(null); // { url, nome }
+  const [previewPdf, setPreviewPdf] = useState(null); // { html, nome }
 
   useEffect(() => {
     if (!CODIGO_USUARIO) { setLoaded(true); return; }
@@ -1091,9 +1091,10 @@ ${paginasHtml}
   };
 
   // Prévia local: lê a planilha no próprio navegador e mostra o conteúdo
-  // dela. Não usa o conversor externo, então não consome crédito nenhum.
-  // Mostra os dados nas posições reais do formulário, mas sem as bordas,
-  // cores e logo do modelo — para isso existe a prévia fiel.
+  // dela. É sempre local, de propósito — o conversor externo é cobrado por
+  // conversão, e conferir a prévia não pode gastar crédito. Mostra os dados
+  // nas posições reais do formulário, sem as bordas, cores e logo do modelo;
+  // a formatação oficial só aparece no arquivo final baixado.
   const previewRelatorio = async (tipo) => {
     const isAdiantamentoReq = tipo === "solicitacao-adiantamento";
     setGerandoPreview(tipo);
@@ -1108,7 +1109,7 @@ ${paginasHtml}
       // Mesma composição do PDF final: formulário na página 1 e, depois, uma
       // página por comprovante. O adiantamento não leva comprovantes.
       const paginas = isAdiantamentoReq ? [] : reportPages;
-      setPreviewPdf({ html: montarPreviaHtml(tabela, paginas), nome: ROTULO_FORM[tipo], tipo });
+      setPreviewPdf({ html: montarPreviaHtml(tabela, paginas), nome: ROTULO_FORM[tipo] });
     } catch (e) {
       showToast(`Não foi possível gerar a prévia: ${e.message}`, true);
     } finally {
@@ -1116,45 +1117,7 @@ ${paginasHtml}
     }
   };
 
-  // Prévia fiel: usa o conversor externo para render igual ao arquivo final
-  // (com formatação do modelo e as imagens dos comprovantes). Consome uma
-  // conversão, por isso fica atrás de um clique explícito.
-  const previewFiel = async (tipo) => {
-    const isAdiantamentoReq = tipo === "solicitacao-adiantamento";
-    setGerandoPreview(tipo);
-    try {
-      const xlsxBytes = await gerarPlanilhaBytes(tipo);
-      const paginas = isAdiantamentoReq ? [] : reportPages.map((r) => ({
-        id: r.id, page: r.page, mediaType: r.mediaType, data: r.data, tipo: r.tipo, valor: r.valor, obs: r.obs,
-      }));
-      const resPdf = await fetch(functionUrl("generate-photo-report"), {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ xlsxBase64: uint8ParaBase64(xlsxBytes), pages: paginas }),
-      });
-      if (!resPdf.ok) {
-        const err = await resPdf.json().catch(() => ({}));
-        throw new Error(err.error || `HTTP ${resPdf.status}`);
-      }
-      // Aviso não-fatal (ex.: a página da planilha não pôde ser convertida)
-      // vem em header, porque o corpo da resposta é o PDF binário.
-      const aviso = resPdf.headers.get("X-Aviso");
-      const url = URL.createObjectURL(await resPdf.blob());
-      setPreviewPdf((atual) => {
-        if (atual && atual.url) URL.revokeObjectURL(atual.url);
-        return { url, nome: ROTULO_FORM[tipo], tipo };
-      });
-      if (aviso) showToast(decodeURIComponent(aviso), true);
-    } catch (e) {
-      showToast(`Não foi possível gerar a prévia fiel: ${e.message}`, true);
-    } finally {
-      setGerandoPreview(null);
-    }
-  };
-
-  const fecharPreviewPdf = () => {
-    if (previewPdf && previewPdf.url) URL.revokeObjectURL(previewPdf.url);
-    setPreviewPdf(null);
-  };
+  const fecharPreviewPdf = () => setPreviewPdf(null);
 
   const BotaoPreview = ({ tipo }) => (
     <button onClick={() => previewRelatorio(tipo)} disabled={!!gerandoPreview || gerando}
@@ -1896,46 +1859,24 @@ ${paginasHtml}
                 <p className="truncate text-sm font-semibold text-slate-800">Prévia — {previewPdf.nome}</p>
                 <p className="text-xs text-slate-500">Só para conferir. Nada foi salvo nem apagado.</p>
               </div>
-              <div className="flex shrink-0 items-center gap-2">
-                {previewPdf.url && (
-                  <a href={previewPdf.url} target="_blank" rel="noreferrer"
-                    className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">
-                    Abrir em nova aba
-                  </a>
-                )}
-                <button onClick={fecharPreviewPdf} title="Fechar" className="rounded p-1.5 text-slate-500 hover:bg-slate-100">
-                  <XIcon size={18} />
-                </button>
-              </div>
+              <button onClick={fecharPreviewPdf} title="Fechar" className="shrink-0 rounded p-1.5 text-slate-500 hover:bg-slate-100">
+                <XIcon size={18} />
+              </button>
             </div>
 
-            {previewPdf.html ? (
-              <>
-                {/* Sem "allow-scripts": nenhum script roda aqui, e o conteúdo
-                    vem de texto digitado pelo próprio usuário.
-                    "allow-same-origin" é necessário — testado: com sandbox
-                    totalmente fechado a origem fica opaca e as imagens dos
-                    comprovantes não carregam. Como scripts seguem bloqueados,
-                    liberar a origem não abre acesso à página de fora. */}
-                <iframe title="Prévia do relatório" sandbox="allow-same-origin" className="min-h-0 flex-1 bg-stone-100"
-                  srcDoc={previewPdf.html} />
-                <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-stone-50 px-3 py-2">
-                  <p className="text-xs text-slate-500">
-                    Mostra os dados nas posições do formulário, sem as bordas e a logo do modelo — sem consumir conversão.
-                  </p>
-                  <button onClick={() => previewFiel(previewPdf.tipo)} disabled={!!gerandoPreview}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-                    {gerandoPreview
-                      ? <><LoaderIcon size={13} className="animate-spin" /> Gerando…</>
-                      : <>Ver igual ao arquivo final (usa 1 conversão)</>}
-                  </button>
-                </div>
-              </>
-            ) : (
-              /* Alguns navegadores de celular não exibem PDF dentro de iframe;
-                 por isso o botão "Abrir em nova aba" fica sempre visível. */
-              <iframe src={previewPdf.url} title="Prévia do relatório" className="min-h-0 flex-1 bg-stone-100" />
-            )}
+            {/* Sem "allow-scripts": nenhum script roda aqui, e o conteúdo vem
+                de texto digitado pelo próprio usuário.
+                "allow-same-origin" é necessário — testado: com sandbox
+                totalmente fechado a origem fica opaca e as imagens dos
+                comprovantes não carregam. Como scripts seguem bloqueados,
+                liberar a origem não abre acesso à página de fora. */}
+            <iframe title="Prévia do relatório" sandbox="allow-same-origin" className="min-h-0 flex-1 bg-stone-100"
+              srcDoc={previewPdf.html} />
+            <div className="shrink-0 border-t border-slate-200 bg-stone-50 px-3 py-2">
+              <p className="text-xs text-slate-500">
+                Mostra os dados nas posições do formulário, sem as bordas e a logo do modelo. O arquivo final sai com a formatação oficial.
+              </p>
+            </div>
           </div>
         </div>
       )}
