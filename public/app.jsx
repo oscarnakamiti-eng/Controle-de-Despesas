@@ -530,7 +530,7 @@ function App() {
   const assinaturaInputRef = useRef(null);
   const dropRef = useRef(null);
 
-  // login por nome (sem senha — a senha do site inteiro já é a barreira)
+  // login por nome (sem senha — saber o próprio nome cadastrado já é a barreira)
   const [loginNome, setLoginNome] = useState("");
   const [loginCarregando, setLoginCarregando] = useState(false);
   const [loginErro, setLoginErro] = useState(null);

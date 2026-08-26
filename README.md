@@ -92,10 +92,13 @@ netlify dev
 
 ## Observações
 
-- O site inteiro (páginas e funções) fica protegido por usuário/senha via
-  `netlify/edge-functions/gate.js`, configurável em **Site settings → Environment
-  variables** (`SITE_USER` e `SITE_PASSWORD`). Sem `SITE_PASSWORD` definida, o site
-  fica aberto — defina-a antes de divulgar o link.
+- O acesso é por nome de usuário (login.mjs, sem senha) — cada pessoa é
+  cadastrada pelo administrador via `admin.mjs` (protegido por `ADMIN_TOKEN`).
+  O site inteiro chegou a ficar atrás de uma senha compartilhada via
+  `netlify/edge-functions/gate.js`, mas isso foi desativado: quebrava a
+  chamada de login em alguns navegadores/webviews de celular (a credencial
+  do Basic Auth não era reenviada na chamada em segundo plano). O arquivo
+  continua no repositório, desligado, com a justificativa em comentário.
 - Almoço e jantar acima de R$ 35,00 aparecem sinalizados na tabela.
 - O modelo usado na leitura é `claude-sonnet-5` (ajustável em `extract.mjs`).
 

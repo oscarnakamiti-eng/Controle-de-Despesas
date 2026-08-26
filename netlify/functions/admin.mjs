@@ -1,13 +1,14 @@
 // Netlify Function (v2) — administração dos usuários (links de acesso).
-// Protegida por ADMIN_TOKEN (env var), separado da senha do site.
+// Protegida por ADMIN_TOKEN (env var) — única barreira desde que a senha do
+// site inteiro (Basic Auth) foi desativada, ver netlify/edge-functions/gate.js.
 //
 // GET  -> lista os usuários cadastrados
 // POST { acao: "criar", nome }              -> cria um usuário novo, devolve o link
 // POST { acao: "revogar", codigo }          -> revoga um código (dados continuam intactos)
 // POST { acao: "regenerar", codigo }        -> troca o código de alguém, mantendo os mesmos dados
 //
-// Uso (via curl, com a senha do site + o token de admin):
-//   curl -u "$SITE_USER:$SITE_PASSWORD" -H "x-admin-token: $ADMIN_TOKEN" \
+// Uso (via curl, com o token de admin):
+//   curl -H "x-admin-token: $ADMIN_TOKEN" \
 //     -X POST https://SEUSITE/.netlify/functions/admin -d '{"acao":"criar","nome":"Maria"}'
 
 import { autenticadoAdmin, listarUsuarios, buscarUsuarioPorCodigo, gravarUsuario, gerarCodigo, gerarUserId, buscarCodigoPorNome, vincularLogin, removerLogin, normalizarNome } from "./lib/usuarios.mjs";

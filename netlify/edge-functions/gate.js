@@ -1,20 +1,17 @@
-// Protege o site inteiro (páginas e funções) com usuário/senha via HTTP Basic Auth.
-// Configurável em Site settings -> Environment variables: SITE_USER e SITE_PASSWORD.
-// Sem SITE_PASSWORD configurada, o site fica aberto (nenhum bloqueio é aplicado).
+// Desativado: o site inteiro exigia usuário/senha via HTTP Basic Auth antes
+// de existir login por nome. Foi desligado porque a senha compartilhada
+// quebrava silenciosamente em alguns navegadores/webviews de celular — o
+// app fazia uma chamada em segundo plano (POST para /login) sem reenviar a
+// credencial cacheada, e a pessoa via "Autenticação necessária" (401) na
+// hora de entrar com o nome dela. A proteção real agora é: cada pessoa
+// precisa saber o próprio nome de usuário cadastrado (login.mjs), e as
+// ações de administração exigem ADMIN_TOKEN à parte (lib/usuarios.mjs).
+//
+// Não removido do repositório para manter o histórico de por que existiu;
+// se um dia fizer sentido reativar, o código antigo está no git log.
 
 export default async (req, context) => {
-  const user = Netlify.env.get("SITE_USER") || "";
-  const pass = Netlify.env.get("SITE_PASSWORD") || "";
-  if (!pass) return context.next();
-
-  const auth = req.headers.get("authorization") || "";
-  const esperado = "Basic " + btoa(`${user}:${pass}`);
-  if (auth === esperado) return context.next();
-
-  return new Response("Autenticação necessária.", {
-    status: 401,
-    headers: { "WWW-Authenticate": 'Basic realm="Despesas de Viagem"' },
-  });
+  return context.next();
 };
 
-export const config = { path: "/*" };
+export const config = { path: "/__nunca-bate-em-nada__" };

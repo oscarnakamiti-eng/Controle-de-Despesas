@@ -114,8 +114,8 @@ export async function resolverUsuario(req) {
   return registro.userId;
 }
 
-// Autenticação separada da senha do site (SITE_USER/SITE_PASSWORD) — quem
-// tem a senha do site não deve conseguir se auto-promover a administrador.
+// Autenticação própria do admin, independente do login por nome — quem sabe
+// o nome de alguém não deve conseguir se auto-promover a administrador.
 // Sem ADMIN_TOKEN configurado, o endpoint de admin fica bloqueado (fail-closed).
 export function autenticadoAdmin(req) {
   const tokenEsperado = process.env.ADMIN_TOKEN || "";

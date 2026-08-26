@@ -1,5 +1,6 @@
-// Netlify Function (v2) — login por nome de usuário (sem senha; a senha do
-// site inteiro, via Basic Auth, já é a barreira de entrada). Em vez de cada
+// Netlify Function (v2) — login por nome de usuário (sem senha; saber o
+// próprio nome cadastrado já é a barreira de entrada — ver justificativa em
+// netlify/edge-functions/gate.js). Em vez de cada
 // pessoa receber um link com um código na URL, ela digita o próprio nome
 // aqui e recebe de volta esse mesmo código, que o navegador guarda como
 // sempre guardou — o isolamento por usuário nas outras funções não muda em
