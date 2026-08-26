@@ -49,17 +49,11 @@ function politicaDoTipo(profile, tipo) {
   return p || POLITICAS_PADRAO[tipo] || { ativo: false, limite: "" };
 }
 
-const TIPO_STYLE = {
-  "Almoço": "bg-amber-100 text-amber-800 border-amber-300",
-  "Jantar": "bg-indigo-100 text-indigo-800 border-indigo-300",
-  "Combustível": "bg-orange-100 text-orange-800 border-orange-300",
-  "Hospedagem": "bg-teal-100 text-teal-800 border-teal-300",
-  "Materiais e Serviços": "bg-slate-200 text-slate-800 border-slate-400",
-};
-
-// Paleta do gráfico por tipo — cores validadas (contraste, daltonismo) nesta
+// Paleta por tipo de despesa — cores validadas (contraste, daltonismo) nesta
 // ordem fixa. A ordem é o que garante a segurança: nunca reordenar as barras
 // por valor, senão pares nunca testados como vizinhos podem ficar lado a lado.
+// Fonte única: as barras do gráfico e as etiquetas da tabela saem daqui, pra
+// um tipo nunca aparecer com cores diferentes nos dois lugares.
 const TIPO_COR = {
   "Almoço": "#2a78d6",
   "Jantar": "#eb6834",
@@ -67,6 +61,49 @@ const TIPO_COR = {
   "Hospedagem": "#eda100",
   "Materiais e Serviços": "#e87ba4",
 };
+
+// Mistura a cor com branco (alvo 255) ou preto (alvo 0). Feito em JS, e não
+// com color-mix() do CSS, porque o app precisa funcionar em webviews de
+// celular mais simples — já tivemos incompatibilidade desse tipo aqui.
+function misturar(hex, proporcao, alvo) {
+  const n = parseInt(hex.slice(1), 16);
+  const canais = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const m = canais.map((c) => Math.round(c * proporcao + alvo * (1 - proporcao)));
+  return `rgb(${m[0]}, ${m[1]}, ${m[2]})`;
+}
+
+function canais(rgb) {
+  return rgb.match(/\d+/g).slice(0, 3).map(Number);
+}
+// Contraste WCAG entre duas cores "rgb(...)".
+function contraste(a, b) {
+  const lum = (rgb) => {
+    const l = canais(rgb).map((c) => {
+      const v = c / 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2];
+  };
+  const la = lum(a), lb = lum(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+// Etiqueta do tipo na tabela: mesma cor da barra do gráfico, em versão clara
+// no fundo e escura no texto. O texto da etiqueta é pequeno (12px), e a cor
+// cheia não sustentaria contraste suficiente em todos os tipos — por isso a
+// etiqueta usa tons da própria cor em vez do preenchimento sólido.
+// O texto é escurecido até atingir 4.5:1 (mínimo do WCAG AA para texto
+// pequeno); sem isso o amarelo da Hospedagem ficava em 4.15.
+function estiloTipo(tipo) {
+  const cor = TIPO_COR[tipo];
+  if (!cor) return { backgroundColor: "#f1f5f9", color: "#334155", borderColor: "#cbd5e1" };
+  const fundo = misturar(cor, 0.16, 255);
+  let texto = misturar(cor, 0.66, 0);
+  for (let p = 0.66; p >= 0.3 && contraste(texto, fundo) < 4.5; p -= 0.04) {
+    texto = misturar(cor, p, 0);
+  }
+  return { backgroundColor: fundo, borderColor: misturar(cor, 0.45, 255), color: texto };
+}
 
 // Gráfico de barras horizontais com a somatória das despesas por tipo.
 // Mostra sempre os 5 tipos, na mesma ordem — ver comentário de TIPO_COR.
@@ -1339,7 +1376,7 @@ function App() {
                             </div>
                           </td>
                           <td className="px-3 py-2">
-                            <span className={`inline-block rounded border px-2 py-0.5 text-xs font-medium ${TIPO_STYLE[r.tipo] || "bg-slate-100 text-slate-700 border-slate-300"}`}>{r.tipo}</span>
+                            <span className="inline-block rounded border px-2 py-0.5 text-xs font-medium" style={estiloTipo(r.tipo)}>{r.tipo}</span>
                           </td>
                           <td className="px-3 py-2 text-slate-600">
                             {r.obs || <span className="text-slate-300">—</span>}
