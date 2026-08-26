@@ -1012,6 +1012,11 @@ function App() {
     "prestacao-contas": "prestacao-contas.zip",
     "reembolso": "solicitacao-reembolso.zip",
   };
+  // Estilo da prévia local. A tabela vem do sheet_to_html (documento HTML
+  // completo), então é injetado no <head> dele.
+  const ESTILO_PREVIA =
+    "<style>body{margin:0;padding:12px;font-family:system-ui,sans-serif;font-size:12px;color:#0f172a}" +
+    "table{border-collapse:collapse}td{border:1px solid #e2e8f0;padding:3px 6px;white-space:nowrap}</style>";
   const ROTULO_FORM = {
     "solicitacao-adiantamento": "Solicitação de adiantamento",
     "prestacao-contas": "Prestação de contas + imagens",
@@ -1032,24 +1037,50 @@ function App() {
     };
   };
 
-  // Prévia em PDF, só para conferir antes de finalizar: gera a planilha,
-  // converte em PDF e (fora do adiantamento) anexa as imagens dos
-  // comprovantes. Não pede local para salvar e NÃO apaga nada — é a
-  // diferença para baixarPlanilha.
+  // Pede ao servidor a planilha oficial já preenchida (mesmo arquivo do
+  // download final).
+  const gerarPlanilhaBytes = async (tipo) => {
+    const res = await fetch(functionUrl("generate-report"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(corpoDoFormulario(tipo)),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    return new Uint8Array(await res.arrayBuffer());
+  };
+
+  // Prévia local: lê a planilha no próprio navegador e mostra o conteúdo
+  // dela. Não usa o conversor externo, então não consome crédito nenhum.
+  // Mostra os dados nas posições reais do formulário, mas sem as bordas,
+  // cores e logo do modelo — para isso existe a prévia fiel.
   const previewRelatorio = async (tipo) => {
+    setGerandoPreview(tipo);
+    try {
+      if (!window.XLSX) throw new Error("A biblioteca de planilha não carregou. Recarregue a página.");
+      const bytes = await gerarPlanilhaBytes(tipo);
+      // cellDates + dateNF: sem isso as datas saem no formato americano
+      // (8/1/26 em vez de 01/08/2026) e parecem erradas na conferência.
+      const wb = window.XLSX.read(bytes, { type: "array", cellDates: true, dateNF: "dd/mm/yyyy" });
+      const aba = wb.Sheets[wb.SheetNames[0]];
+      const tabela = window.XLSX.utils.sheet_to_html(aba, { editable: false });
+      setPreviewPdf({ html: tabela, nome: ROTULO_FORM[tipo], tipo });
+    } catch (e) {
+      showToast(`Não foi possível gerar a prévia: ${e.message}`, true);
+    } finally {
+      setGerandoPreview(null);
+    }
+  };
+
+  // Prévia fiel: usa o conversor externo para render igual ao arquivo final
+  // (com formatação do modelo e as imagens dos comprovantes). Consome uma
+  // conversão, por isso fica atrás de um clique explícito.
+  const previewFiel = async (tipo) => {
     const isAdiantamentoReq = tipo === "solicitacao-adiantamento";
     setGerandoPreview(tipo);
     try {
-      const res = await fetch(functionUrl("generate-report"), {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(corpoDoFormulario(tipo)),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `HTTP ${res.status}`);
-      }
-      const xlsxBytes = new Uint8Array(await res.arrayBuffer());
-
+      const xlsxBytes = await gerarPlanilhaBytes(tipo);
       const paginas = isAdiantamentoReq ? [] : reportPages.map((r) => ({
         id: r.id, page: r.page, mediaType: r.mediaType, data: r.data, tipo: r.tipo, valor: r.valor, obs: r.obs,
       }));
@@ -1065,17 +1096,20 @@ function App() {
       // vem em header, porque o corpo da resposta é o PDF binário.
       const aviso = resPdf.headers.get("X-Aviso");
       const url = URL.createObjectURL(await resPdf.blob());
-      setPreviewPdf({ url, nome: ROTULO_FORM[tipo] });
+      setPreviewPdf((atual) => {
+        if (atual && atual.url) URL.revokeObjectURL(atual.url);
+        return { url, nome: ROTULO_FORM[tipo], tipo };
+      });
       if (aviso) showToast(decodeURIComponent(aviso), true);
     } catch (e) {
-      showToast(`Não foi possível gerar a prévia: ${e.message}`, true);
+      showToast(`Não foi possível gerar a prévia fiel: ${e.message}`, true);
     } finally {
       setGerandoPreview(null);
     }
   };
 
   const fecharPreviewPdf = () => {
-    if (previewPdf) URL.revokeObjectURL(previewPdf.url);
+    if (previewPdf && previewPdf.url) URL.revokeObjectURL(previewPdf.url);
     setPreviewPdf(null);
   };
 
@@ -1820,18 +1854,41 @@ function App() {
                 <p className="text-xs text-slate-500">Só para conferir. Nada foi salvo nem apagado.</p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <a href={previewPdf.url} target="_blank" rel="noreferrer"
-                  className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">
-                  Abrir em nova aba
-                </a>
+                {previewPdf.url && (
+                  <a href={previewPdf.url} target="_blank" rel="noreferrer"
+                    className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                    Abrir em nova aba
+                  </a>
+                )}
                 <button onClick={fecharPreviewPdf} title="Fechar" className="rounded p-1.5 text-slate-500 hover:bg-slate-100">
                   <XIcon size={18} />
                 </button>
               </div>
             </div>
-            {/* Alguns navegadores de celular não exibem PDF dentro de iframe;
-                por isso o botão "Abrir em nova aba" fica sempre visível. */}
-            <iframe src={previewPdf.url} title="Prévia do relatório" className="min-h-0 flex-1 bg-stone-100" />
+
+            {previewPdf.html ? (
+              <>
+                {/* sandbox sem "allow-scripts": a tabela vem de dados
+                    digitados pelo próprio usuário, então roda isolada. */}
+                <iframe title="Prévia do formulário" sandbox="" className="min-h-0 flex-1 bg-white"
+                  srcDoc={previewPdf.html.replace("</head>", `${ESTILO_PREVIA}</head>`)} />
+                <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-stone-50 px-3 py-2">
+                  <p className="text-xs text-slate-500">
+                    Mostra os dados nas posições do formulário, sem as bordas e a logo do modelo — sem consumir conversão.
+                  </p>
+                  <button onClick={() => previewFiel(previewPdf.tipo)} disabled={!!gerandoPreview}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                    {gerandoPreview
+                      ? <><LoaderIcon size={13} className="animate-spin" /> Gerando…</>
+                      : <>Ver igual ao arquivo final (usa 1 conversão)</>}
+                  </button>
+                </div>
+              </>
+            ) : (
+              /* Alguns navegadores de celular não exibem PDF dentro de iframe;
+                 por isso o botão "Abrir em nova aba" fica sempre visível. */
+              <iframe src={previewPdf.url} title="Prévia do relatório" className="min-h-0 flex-1 bg-stone-100" />
+            )}
           </div>
         </div>
       )}
