@@ -1304,7 +1304,10 @@ function App() {
                       )} />
                   </th>
                   <th className="px-3 py-2">Data</th><th className="px-3 py-2">Tipo</th>
-                  <th className="px-3 py-2">Histórico</th><th className="px-3 py-2 text-right">Valor</th>
+                  {/* No celular em retrato a coluna ficava com ~104px e
+                      quebrava demais o histórico; min-w dobra a largura só
+                      aí (a tabela já rola lateralmente nessa largura). */}
+                  <th className="min-w-[208px] px-3 py-2 sm:min-w-0">Histórico</th><th className="px-3 py-2 text-right">Valor</th>
                   <th className="no-print px-3 py-2">Ações</th>
                 </tr>
               </thead>
