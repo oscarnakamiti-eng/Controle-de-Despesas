@@ -598,6 +598,8 @@ function App() {
   const [rateio, setRateio] = useState([]);
   const [previsoes, setPrevisoes] = useState([]);
   const [gerando, setGerando] = useState(false);
+  const [gerandoPreview, setGerandoPreview] = useState(null); // tipo em geração
+  const [previewPdf, setPreviewPdf] = useState(null); // { url, nome }
 
   useEffect(() => {
     if (!CODIGO_USUARIO) { setLoaded(true); return; }
@@ -1010,6 +1012,82 @@ function App() {
     "prestacao-contas": "prestacao-contas.zip",
     "reembolso": "solicitacao-reembolso.zip",
   };
+  const ROTULO_FORM = {
+    "solicitacao-adiantamento": "Solicitação de adiantamento",
+    "prestacao-contas": "Prestação de contas + imagens",
+    "reembolso": "Solicitação de reembolso + imagens",
+  };
+
+  // Monta o corpo enviado ao gerador da planilha. Usado tanto pela prévia
+  // quanto pelo download final, pra os dois verem exatamente o mesmo
+  // formulário — se divergirem, a prévia deixa de valer como conferência.
+  const corpoDoFormulario = (tipo) => {
+    const isAdiantamentoReq = tipo === "solicitacao-adiantamento";
+    const registros = isAdiantamentoReq ? [] : sorted.map(({ dateObj, ...resto }) => resto);
+    return {
+      tipo, profile, motivo, rateio: flattenRateio(rateio),
+      valorAdiantamento: parseValorInput(valorAdiantamento),
+      records: registros.map((r) => ({ data: r.data, tipo: r.tipo, obs: r.obs, valor: r.valor })),
+      previsoes: isAdiantamentoReq ? previsoes.map((p) => ({ obs: p.obs, valor: parseValorInput(p.valor) })) : [],
+    };
+  };
+
+  // Prévia em PDF, só para conferir antes de finalizar: gera a planilha,
+  // converte em PDF e (fora do adiantamento) anexa as imagens dos
+  // comprovantes. Não pede local para salvar e NÃO apaga nada — é a
+  // diferença para baixarPlanilha.
+  const previewRelatorio = async (tipo) => {
+    const isAdiantamentoReq = tipo === "solicitacao-adiantamento";
+    setGerandoPreview(tipo);
+    try {
+      const res = await fetch(functionUrl("generate-report"), {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(corpoDoFormulario(tipo)),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      const xlsxBytes = new Uint8Array(await res.arrayBuffer());
+
+      const paginas = isAdiantamentoReq ? [] : reportPages.map((r) => ({
+        id: r.id, page: r.page, mediaType: r.mediaType, data: r.data, tipo: r.tipo, valor: r.valor, obs: r.obs,
+      }));
+      const resPdf = await fetch(functionUrl("generate-photo-report"), {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ xlsxBase64: uint8ParaBase64(xlsxBytes), pages: paginas }),
+      });
+      if (!resPdf.ok) {
+        const err = await resPdf.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${resPdf.status}`);
+      }
+      // Aviso não-fatal (ex.: a página da planilha não pôde ser convertida)
+      // vem em header, porque o corpo da resposta é o PDF binário.
+      const aviso = resPdf.headers.get("X-Aviso");
+      const url = URL.createObjectURL(await resPdf.blob());
+      setPreviewPdf({ url, nome: ROTULO_FORM[tipo] });
+      if (aviso) showToast(decodeURIComponent(aviso), true);
+    } catch (e) {
+      showToast(`Não foi possível gerar a prévia: ${e.message}`, true);
+    } finally {
+      setGerandoPreview(null);
+    }
+  };
+
+  const fecharPreviewPdf = () => {
+    if (previewPdf) URL.revokeObjectURL(previewPdf.url);
+    setPreviewPdf(null);
+  };
+
+  const BotaoPreview = ({ tipo }) => (
+    <button onClick={() => previewRelatorio(tipo)} disabled={!!gerandoPreview || gerando}
+      title={`Ver prévia em PDF de ${ROTULO_FORM[tipo]} — não apaga nada`}
+      className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+      {gerandoPreview === tipo
+        ? <><LoaderIcon size={16} className="animate-spin" /> Gerando prévia…</>
+        : <><FileTextIcon size={16} /> Prévia</>}
+    </button>
+  );
 
   // Gera a planilha oficial, o relatório fotográfico em PDF (quando cabe) e
   // as fotos dos comprovantes, empacota tudo num único .zip e deixa o
@@ -1479,10 +1557,13 @@ function App() {
                     <span className="font-mono-num font-semibold">{formatValor(totalPrevisto)}</span>
                   </div>
                 </div>
-                <button onClick={() => baixarPlanilha("solicitacao-adiantamento")} disabled={gerando}
-                  className="mt-3 inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">
-                  <DownloadIcon size={16} /> Baixar solicitação de adiantamento
-                </button>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button onClick={() => baixarPlanilha("solicitacao-adiantamento")} disabled={gerando}
+                    className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">
+                    <DownloadIcon size={16} /> Baixar solicitação de adiantamento
+                  </button>
+                  <BotaoPreview tipo="solicitacao-adiantamento" />
+                </div>
               </div>
 
               <div className="mt-4 rounded-lg border-2 border-amber-400 bg-white p-4">
@@ -1507,6 +1588,7 @@ function App() {
                     className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">
                     <DownloadIcon size={16} /> Baixar prestação de contas
                   </button>
+                  <BotaoPreview tipo="prestacao-contas" />
                 </div>
               </div>
             </>
@@ -1520,6 +1602,7 @@ function App() {
                   className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">
                   <DownloadIcon size={16} /> Baixar solicitação de reembolso
                 </button>
+                <BotaoPreview tipo="reembolso" />
               </div>
             </div>
           )}
@@ -1727,6 +1810,31 @@ function App() {
           </div>
         );
       })()}
+
+      {previewPdf && (
+        <div className="no-print fixed inset-0 z-50 flex flex-col bg-black/70 p-3 sm:p-6" onClick={fecharPreviewPdf}>
+          <div className="mx-auto flex h-full w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-white" onClick={(e) => e.stopPropagation()}>
+            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 px-3 py-2">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-slate-800">Prévia — {previewPdf.nome}</p>
+                <p className="text-xs text-slate-500">Só para conferir. Nada foi salvo nem apagado.</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <a href={previewPdf.url} target="_blank" rel="noreferrer"
+                  className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                  Abrir em nova aba
+                </a>
+                <button onClick={fecharPreviewPdf} title="Fechar" className="rounded p-1.5 text-slate-500 hover:bg-slate-100">
+                  <XIcon size={18} />
+                </button>
+              </div>
+            </div>
+            {/* Alguns navegadores de celular não exibem PDF dentro de iframe;
+                por isso o botão "Abrir em nova aba" fica sempre visível. */}
+            <iframe src={previewPdf.url} title="Prévia do relatório" className="min-h-0 flex-1 bg-stone-100" />
+          </div>
+        </div>
+      )}
 
       {avisoLimite && (() => {
         const rec = records.find((r) => r.id === avisoLimite.id);
