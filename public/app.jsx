@@ -404,7 +404,17 @@ function ReportPageCard({ r, idx, total, onBaixar, fileUrl }) {
   const disponivel = !!r.src && !imgFalhou;
   return (
     <div className="report-page rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      {r.obs && <p className="mb-3 border-b border-slate-100 pb-2 text-sm text-slate-600">{r.obs}</p>}
+      <div className="mb-3 flex items-start justify-between gap-3 border-b border-slate-100 pb-2">
+        <div className="min-w-0">
+          <p className="font-mono-num text-xs text-slate-500">{r.data} · {r.tipo} · {formatValor(r.valor)}</p>
+          {r.obs && <p className="mt-1 text-sm text-slate-600">{r.obs}</p>}
+        </div>
+        {disponivel && (
+          <button onClick={() => onBaixar(r, idx)} title="Baixar este comprovante" className="no-print shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+            <DownloadIcon size={14} />
+          </button>
+        )}
+      </div>
       {disponivel ? (
         <img src={r.src} alt={r.fileName || "comprovante"} className="mx-auto max-h-[70vh] w-auto rounded" onError={() => setImgFalhou(true)} />
       ) : (
@@ -418,19 +428,9 @@ function ReportPageCard({ r, idx, total, onBaixar, fileUrl }) {
           <div className="mt-1 text-xs text-slate-400">{r.fileName}</div>
         </div>
       )}
-      <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2 text-xs text-slate-500">
-        <span>
-          Página {idx + 1} de {total}
-          {r.totalPages > 1 && <span className="ml-1 text-slate-400">(arquivo {r.page}/{r.totalPages})</span>}
-        </span>
-        <span className="flex items-center gap-2">
-          <span className="font-mono-num">{r.data} · {r.tipo} · {formatValor(r.valor)}</span>
-          {disponivel && (
-            <button onClick={() => onBaixar(r, idx)} title="Baixar este comprovante" className="no-print rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
-              <DownloadIcon size={14} />
-            </button>
-          )}
-        </span>
+      <div className="mt-3 border-t border-slate-100 pt-2 text-center text-xs text-slate-500">
+        Página {idx + 1} de {total}
+        {r.totalPages > 1 && <span className="ml-1 text-slate-400">(arquivo {r.page}/{r.totalPages})</span>}
       </div>
     </div>
   );
