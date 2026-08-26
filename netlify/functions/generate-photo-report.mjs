@@ -161,13 +161,12 @@ export default async (req) => {
         page.drawText(cabecalho, { x: MARGEM, y: topo - 10, size: tam, font: fonteNegrito, color: rgb(0.1, 0.1, 0.15) });
       } catch { /* ignora */ }
 
-      // Legenda: histórico (observação), centralizada.
+      // Legenda: histórico (observação), alinhada à esquerda (mesma margem do cabeçalho).
       if (temObs) {
         try {
           const textoObs = textoSeguro(p.obs);
           const tam = ajustarTamanho(fonte, textoObs, 10, larguraDisponivel);
-          const x = (LARGURA - fonte.widthOfTextAtSize(textoObs, tam)) / 2;
-          page.drawText(textoObs, { x, y: topo - 28, size: tam, font: fonte, color: rgb(0.3, 0.3, 0.35) });
+          page.drawText(textoObs, { x: MARGEM, y: topo - 28, size: tam, font: fonte, color: rgb(0.3, 0.3, 0.35) });
         } catch { /* caractere não suportado: segue sem a legenda */ }
       }
 

@@ -1065,7 +1065,7 @@ function App() {
   .pg td{border:1px solid #e2e8f0;padding:3px 6px;white-space:nowrap}
   .planilha{overflow-x:auto}
   .cab{font-weight:700;color:#1a1a26}
-  .leg{margin-top:6px;text-align:center;color:#4d4d59}
+  .leg{margin-top:6px;text-align:left;color:#4d4d59}
   .foto{margin-top:10px;text-align:center}
   .foto img{max-width:100%;height:auto;border:1px solid #e2e8f0;border-radius:4px}
   .indisp{margin-top:10px;text-align:center;color:#8a1a1a}
