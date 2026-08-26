@@ -1012,11 +1012,6 @@ function App() {
     "prestacao-contas": "prestacao-contas.zip",
     "reembolso": "solicitacao-reembolso.zip",
   };
-  // Estilo da prévia local. A tabela vem do sheet_to_html (documento HTML
-  // completo), então é injetado no <head> dele.
-  const ESTILO_PREVIA =
-    "<style>body{margin:0;padding:12px;font-family:system-ui,sans-serif;font-size:12px;color:#0f172a}" +
-    "table{border-collapse:collapse}td{border:1px solid #e2e8f0;padding:3px 6px;white-space:nowrap}</style>";
   const ROTULO_FORM = {
     "solicitacao-adiantamento": "Solicitação de adiantamento",
     "prestacao-contas": "Prestação de contas + imagens",
@@ -1035,6 +1030,50 @@ function App() {
       records: registros.map((r) => ({ data: r.data, tipo: r.tipo, obs: r.obs, valor: r.valor })),
       previsoes: isAdiantamentoReq ? previsoes.map((p) => ({ obs: p.obs, valor: parseValorInput(p.valor) })) : [],
     };
+  };
+
+  // Monta o documento da prévia local, espelhando a composição do PDF final:
+  // formulário na primeira página e, depois, uma página por comprovante com
+  // cabeçalho (data/tipo/valor), legenda (histórico) e rodapé (numeração) —
+  // ver o mesmo layout em netlify/functions/generate-photo-report.mjs.
+  const montarPreviaHtml = (tabelaHtml, paginas) => {
+    const escapar = (s) => String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const total = 1 + paginas.length;
+    const tabela = (tabelaHtml.match(/<table[\s\S]*<\/table>/) || [tabelaHtml])[0];
+
+    const pagina = (conteudo, numero) =>
+      `<section class="pg">${conteudo}<div class="rodape">Página ${numero} de ${total}</div></section>`;
+
+    const paginasHtml = paginas.map((r, i) => {
+      const valorFmt = (Number(r.valor) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const cabecalho = `<div class="cab">${escapar(r.data)} &nbsp;-&nbsp; ${escapar(r.tipo)} &nbsp;-&nbsp; R$ ${valorFmt}</div>`;
+      const legenda = r.obs ? `<div class="leg">${escapar(r.obs)}</div>` : "";
+      // URL absoluta: dentro do iframe com sandbox a origem é opaca, então
+      // caminho relativo não resolveria de forma confiável.
+      const corpo = r.src
+        ? `<div class="foto"><img loading="lazy" src="${escapar(new URL(r.src, location.origin).href)}" alt="Comprovante"></div>`
+        : `<div class="indisp">Comprovante indisponível para este lançamento.</div>`;
+      return pagina(cabecalho + legenda + corpo, i + 2);
+    }).join("");
+
+    return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<style>
+  body{margin:0;padding:12px;background:#f5f5f4;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:12px;color:#0f172a}
+  .pg{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:14px;margin:0 auto 14px;max-width:820px}
+  .pg table{border-collapse:collapse}
+  .pg td{border:1px solid #e2e8f0;padding:3px 6px;white-space:nowrap}
+  .planilha{overflow-x:auto}
+  .cab{font-weight:700;color:#1a1a26}
+  .leg{margin-top:6px;text-align:center;color:#4d4d59}
+  .foto{margin-top:10px;text-align:center}
+  .foto img{max-width:100%;height:auto;border:1px solid #e2e8f0;border-radius:4px}
+  .indisp{margin-top:10px;text-align:center;color:#8a1a1a}
+  .rodape{margin-top:12px;padding-top:8px;border-top:1px solid #eef1f5;text-align:center;color:#66666f}
+</style></head><body>
+${pagina(`<div class="planilha">${tabela}</div>`, 1)}
+${paginasHtml}
+</body></html>`;
   };
 
   // Pede ao servidor a planilha oficial já preenchida (mesmo arquivo do
@@ -1056,6 +1095,7 @@ function App() {
   // Mostra os dados nas posições reais do formulário, mas sem as bordas,
   // cores e logo do modelo — para isso existe a prévia fiel.
   const previewRelatorio = async (tipo) => {
+    const isAdiantamentoReq = tipo === "solicitacao-adiantamento";
     setGerandoPreview(tipo);
     try {
       if (!window.XLSX) throw new Error("A biblioteca de planilha não carregou. Recarregue a página.");
@@ -1065,7 +1105,10 @@ function App() {
       const wb = window.XLSX.read(bytes, { type: "array", cellDates: true, dateNF: "dd/mm/yyyy" });
       const aba = wb.Sheets[wb.SheetNames[0]];
       const tabela = window.XLSX.utils.sheet_to_html(aba, { editable: false });
-      setPreviewPdf({ html: tabela, nome: ROTULO_FORM[tipo], tipo });
+      // Mesma composição do PDF final: formulário na página 1 e, depois, uma
+      // página por comprovante. O adiantamento não leva comprovantes.
+      const paginas = isAdiantamentoReq ? [] : reportPages;
+      setPreviewPdf({ html: montarPreviaHtml(tabela, paginas), nome: ROTULO_FORM[tipo], tipo });
     } catch (e) {
       showToast(`Não foi possível gerar a prévia: ${e.message}`, true);
     } finally {
@@ -1868,10 +1911,14 @@ function App() {
 
             {previewPdf.html ? (
               <>
-                {/* sandbox sem "allow-scripts": a tabela vem de dados
-                    digitados pelo próprio usuário, então roda isolada. */}
-                <iframe title="Prévia do formulário" sandbox="" className="min-h-0 flex-1 bg-white"
-                  srcDoc={previewPdf.html.replace("</head>", `${ESTILO_PREVIA}</head>`)} />
+                {/* Sem "allow-scripts": nenhum script roda aqui, e o conteúdo
+                    vem de texto digitado pelo próprio usuário.
+                    "allow-same-origin" é necessário — testado: com sandbox
+                    totalmente fechado a origem fica opaca e as imagens dos
+                    comprovantes não carregam. Como scripts seguem bloqueados,
+                    liberar a origem não abre acesso à página de fora. */}
+                <iframe title="Prévia do relatório" sandbox="allow-same-origin" className="min-h-0 flex-1 bg-stone-100"
+                  srcDoc={previewPdf.html} />
                 <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-stone-50 px-3 py-2">
                   <p className="text-xs text-slate-500">
                     Mostra os dados nas posições do formulário, sem as bordas e a logo do modelo — sem consumir conversão.
