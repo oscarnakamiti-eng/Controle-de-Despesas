@@ -105,7 +105,7 @@ export default async (req) => {
       return json({ ok: true, nome: registro.nome });
     }
 
-    if (acao === "comprovantes-orfaos") {
+    if (acao === "comprovantes-orfaos-v2") {
       // Diagnóstico temporário, só leitura: lista comprovantes que ainda
       // estão guardados nos Blobs mesmo sem aparecer na tabela de despesas
       // — útil quando a tabela foi zerada (ex.: fluxo de "baixar solicitação")
@@ -124,7 +124,7 @@ export default async (req) => {
       return json({ nome: registro.nome, total: arquivos.length, arquivos });
     }
 
-    return json({ error: "Ação inválida. Use 'criar', 'revogar', 'regenerar', 'renomear', 'vincular-login' ou 'comprovantes-orfaos'." }, 400);
+    return json({ error: "Ação inválida. Use 'criar', 'revogar', 'regenerar', 'renomear', 'vincular-login' ou 'comprovantes-orfaos-v2'." }, 400);
   }
 
   return json({ error: "Método não permitido" }, 405);
