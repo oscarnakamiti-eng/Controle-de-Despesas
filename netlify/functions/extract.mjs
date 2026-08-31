@@ -10,12 +10,13 @@ import { chaveArquivo, chaveArquivoMeta } from "./files.mjs";
 const EXTRACTION_PROMPT = `Analise o comprovante, recibo, nota fiscal ou cupom fiscal anexado e extraia as informações do gasto.
 
 Responda APENAS com um objeto JSON puro, sem markdown, sem texto antes ou depois, no formato exato:
-{"data": "DD/MM/AAAA", "tipo": "Almoço" | "Jantar" | "Combustível" | "Hospedagem" | "Materiais e Serviços", "valor": 0.00, "observacoes": "texto curto"}
+{"data": "DD/MM/AAAA", "tipo": "Almoço" | "Jantar" | "Combustível" | "Hospedagem" | "Materiais e Serviços" | "Passagens", "valor": 0.00, "observacoes": "texto curto"}
 
 Regras:
-- "tipo" deve ser exatamente um dos cinco valores acima.
+- "tipo" deve ser exatamente um dos seis valores acima.
 - Para Almoço ou Jantar: se houver horário no comprovante, até 16:00 é Almoço e após 16:00 é Jantar. Sem horário visível, use o contexto (nome do estabelecimento, itens consumidos).
-- Para "Materiais e Serviços", a "observacoes" deve descrever brevemente o que foi comprado ou contratado.
+- "Passagens" cobre passagem aérea, rodoviária, táxi e aplicativos de transporte (Uber, 99 etc.).
+- Para "Materiais e Serviços" ou "Passagens", a "observacoes" deve descrever brevemente o que foi comprado ou contratado (ex.: trajeto, companhia, destino).
 - "valor" é o valor TOTAL pago, como número decimal usando ponto (ex.: 1234.56), sem separador de milhares.
 - "data" é a data da compra/consumo (não a data de emissão do relatório).
 - Se algum campo não puder ser identificado com certeza, use null nesse campo.
