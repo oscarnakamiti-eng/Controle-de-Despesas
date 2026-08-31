@@ -11,7 +11,8 @@
 //   curl -H "x-admin-token: $ADMIN_TOKEN" \
 //     -X POST https://SEUSITE/.netlify/functions/admin -d '{"acao":"criar","nome":"Maria"}'
 
-import { autenticadoAdmin, listarUsuarios, buscarUsuarioPorCodigo, gravarUsuario, gerarCodigo, gerarUserId, buscarCodigoPorNome, vincularLogin, removerLogin, normalizarNome } from "./lib/usuarios.mjs";
+import { getStore } from "@netlify/blobs";
+import { autenticadoAdmin, listarUsuarios, buscarUsuarioPorCodigo, gravarUsuario, gerarCodigo, gerarUserId, buscarCodigoPorNome, vincularLogin, removerLogin, normalizarNome, STORE_NOME, chave } from "./lib/usuarios.mjs";
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -104,7 +105,26 @@ export default async (req) => {
       return json({ ok: true, nome: registro.nome });
     }
 
-    return json({ error: "Ação inválida. Use 'criar', 'revogar', 'regenerar', 'renomear' ou 'vincular-login'." }, 400);
+    if (acao === "comprovantes-orfaos") {
+      // Diagnóstico temporário, só leitura: lista comprovantes que ainda
+      // estão guardados nos Blobs mesmo sem aparecer na tabela de despesas
+      // — útil quando a tabela foi zerada (ex.: fluxo de "baixar solicitação")
+      // mas os arquivos originais (comprovante) não foram apagados junto.
+      const codigo = String(body.codigo || "");
+      const registro = await buscarUsuarioPorCodigo(codigo);
+      if (!registro) return json({ error: "Código não encontrado." }, 404);
+      const store = getStore(STORE_NOME);
+      const prefixo = chave(registro.userId, "file-meta:");
+      const { blobs } = await store.list({ prefix: prefixo });
+      const arquivos = [];
+      for (const { key } of blobs) {
+        const meta = await store.get(key, { type: "json" });
+        arquivos.push({ id: key.slice(prefixo.length), fileName: meta && meta.fileName, mediaType: meta && meta.mediaType });
+      }
+      return json({ nome: registro.nome, total: arquivos.length, arquivos });
+    }
+
+    return json({ error: "Ação inválida. Use 'criar', 'revogar', 'regenerar', 'renomear', 'vincular-login' ou 'comprovantes-orfaos'." }, 400);
   }
 
   return json({ error: "Método não permitido" }, 405);
