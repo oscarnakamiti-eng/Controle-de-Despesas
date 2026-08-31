@@ -3,9 +3,12 @@
 // páginas (não as imagens), pra não esbarrar no limite de payload do Lambda.
 //
 // POST { pages: [{ id, page, mediaType, data, tipo, valor, obs }, ...], xlsxBase64? }
-// Com xlsxBase64, a planilha é convertida em PDF (via CloudConvert) e vira a
-// primeira página do relatório. Sem CLOUDCONVERT_API_KEY configurada, ou se a
-// conversão falhar, o relatório sai normalmente só com as fotos.
+// Com xlsxBase64, a planilha é convertida em PDF (via CloudConvert) e vira as
+// primeiras páginas do relatório — pode sair mais de uma página quando o
+// formulário tem muitas linhas (ex.: prestação de contas com dezenas de
+// lançamentos) e não cabe inteiro numa página impressa; todas entram, nenhuma
+// é descartada. Sem CLOUDCONVERT_API_KEY configurada, ou se a conversão
+// falhar, o relatório sai normalmente só com as fotos.
 
 import { getStore } from "@netlify/blobs";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
@@ -120,17 +123,18 @@ export default async (req) => {
     // relatório segue normalmente só com as fotos (não trava por causa disso).
     let pdfDoc = null;
     let avisoConversao = null;
-    let temPaginaXlsx = false;
     if (xlsxBase64) {
       try {
         const pdfConvertido = await converterXlsxParaPdf(Buffer.from(xlsxBase64, "base64"));
         if (pdfConvertido) {
+          // Mantém TODAS as páginas que a conversão devolver — o formulário
+          // (uma aba só) pode não caber numa página impressa quando tem
+          // muitos lançamentos, e cortar pra 1 página só descartava o resto
+          // (inclusive total geral e a caixa de assinatura). Chegou a existir
+          // aqui um corte pra 1 página pensado pra remover abas extras do
+          // modelo (ex.: "Histórico de Revisão"), mas os modelos atuais têm
+          // uma aba só — o corte só causava esse problema, sem resolver nada.
           pdfDoc = await PDFDocument.load(pdfConvertido);
-          // A planilha tem mais de uma aba (ex.: "Histórico de Revisão") e o
-          // CloudConvert converte todas — só a primeira página (o formulário
-          // em si) deve entrar no relatório.
-          for (let i = pdfDoc.getPageCount() - 1; i >= 1; i--) pdfDoc.removePage(i);
-          temPaginaXlsx = pdfDoc.getPageCount() > 0;
         } else {
           avisoConversao = "CLOUDCONVERT_API_KEY não configurada — relatório gerado sem a página da planilha.";
         }
@@ -143,8 +147,8 @@ export default async (req) => {
     const fonte = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const fonteNegrito = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-    const totalPaginas = (temPaginaXlsx ? 1 : 0) + pages.length;
-    let indicePagina = temPaginaXlsx ? 1 : 0;
+    const totalPaginas = pdfDoc.getPageCount() + pages.length;
+    let indicePagina = pdfDoc.getPageCount();
 
     for (const p of pages) {
       indicePagina++;
