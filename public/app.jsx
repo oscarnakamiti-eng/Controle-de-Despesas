@@ -553,6 +553,17 @@ function App() {
   const [enviandoAssinatura, setEnviandoAssinatura] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(null);
+  // Só vira true quando a carga inicial (records/profile/rateio/rascunho) no
+  // servidor teve sucesso de verdade — nunca em caso de falha. Existe
+  // separado de "loaded" porque as gravações automáticas (records e
+  // rascunho, mais abaixo) só podem rodar depois de o app ter uma cópia real
+  // dos dados: se "loaded" virasse true mesmo com a leitura falhando, esses
+  // estados ficavam nos valores em branco do useState inicial e a gravação
+  // automática mandava esse conteúdo vazio pro servidor — apagando os dados
+  // de verdade sem o usuário confirmar nada. Foi exatamente isso que causou
+  // a perda de despesas relatada; ver o comentário no useEffect de carga
+  // logo abaixo.
+  const [dadosCarregados, setDadosCarregados] = useState(false);
   const [versaoDesatualizada, setVersaoDesatualizada] = useState(false);
   const versaoCarregadaRef = useRef(null);
   const [queue, setQueue] = useState([]);
@@ -617,6 +628,12 @@ function App() {
         setRateio(Array.isArray(rascunho.rateio) && rascunho.rateio.length > 0 ? rascunho.rateio : (rp.presets || []));
         setPrevisoes(Array.isArray(rascunho.previsoes) ? rascunho.previsoes : []);
         if (rascunho.fluxo) setFluxo(rascunho.fluxo);
+        // Só marca como "carregado" aqui, depois que as 4 chamadas deram
+        // certo. Se qualquer uma falhar, o catch abaixo roda e este flag
+        // nunca vira true — as gravações automáticas (records e rascunho,
+        // mais abaixo) ficam bloqueadas até um recarregamento bem sucedido,
+        // em vez de gravar dados vazios por cima dos de verdade.
+        setDadosCarregados(true);
       } catch (e) {
         setLoadError(String(e.message || e));
       } finally { setLoaded(true); }
@@ -651,13 +668,18 @@ function App() {
   // Salva o formulário de geração em preenchimento (rascunho), pra não se
   // perder se a página fechar antes de gerar. Não há histórico de
   // relatórios já gerados — a empresa controla isso em outra ferramenta.
+  // Gate em "dadosCarregados" pelo mesmo motivo do useEffect de "records"
+  // logo acima: "loaded" também vira true quando a carga inicial falha, e
+  // rascunho.mjs sobrescreve sem checar etag — uma falha de rede na carga
+  // apagaria o rascunho de verdade com os valores em branco, sem o usuário
+  // fazer nada.
   useEffect(() => {
-    if (!loaded) return;
+    if (!dadosCarregados) return;
     const handle = setTimeout(() => {
       apiPost("rascunho", { rascunho: { motivo, valorAdiantamento, rateio, previsoes, fluxo } }).catch(() => {});
     }, 600);
     return () => clearTimeout(handle);
-  }, [motivo, valorAdiantamento, rateio, previsoes, fluxo, loaded]);
+  }, [motivo, valorAdiantamento, rateio, previsoes, fluxo, dadosCarregados]);
 
   // Salva a tabela sempre que muda, mas nunca com duas gravações em voo ao
   // mesmo tempo: durante o envio em lote, cada arquivo processado dispara uma
@@ -716,11 +738,22 @@ function App() {
     } finally { salvandoRef.current = false; }
   }, []);
 
+  // Gate em "dadosCarregados", não em "loaded": "loaded" também vira true
+  // quando a carga inicial FALHA (ver o useEffect acima), e nesse caso
+  // "records" continua no [] do useState inicial — se essa gravação
+  // automática rodasse mesmo assim, ela mandaria esse [] pro servidor. Como
+  // o POST de records.mjs recusa por conflito de etag (etag local ainda
+  // null contra o etag real do servidor) e o app reage a conflito buscando
+  // só o etag novo — sem trazer os dados de volta — a gravação seguinte já
+  // ia com o etag certo e sobrescrevia a tabela de verdade por um [] vazio,
+  // sem nenhuma ação nem confirmação do usuário. Foi essa sequência que
+  // apagou despesas de verdade; com o gate em "dadosCarregados" isso não
+  // roda mais enquanto a leitura não tiver dado certo pelo menos uma vez.
   useEffect(() => {
-    if (!loaded) return;
+    if (!dadosCarregados) return;
     pendenteRef.current = true;
     salvarRecords();
-  }, [records, loaded, salvarRecords]);
+  }, [records, dadosCarregados, salvarRecords]);
 
   const showToast = (msg, isError) => {
     setToast({ msg, isError });
