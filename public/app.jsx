@@ -27,7 +27,7 @@ function functionUrl(nome, query = "") {
   return `/.netlify/functions/${nome}${qs ? `?${qs}` : ""}`;
 }
 
-const TIPOS = ["Almoço", "Jantar", "Combustível", "Hospedagem", "Materiais e Serviços", "Passagens"];
+const TIPOS = ["Almoço", "Jantar", "Combustível", "Hospedagem", "Materiais e Serviços", "Transporte"];
 
 // Política padrão por tipo, usada enquanto o solicitante não personaliza nada
 // na aba Cadastros (mantém o comportamento antigo: Almoço/Jantar com teto de
@@ -38,7 +38,7 @@ const POLITICAS_PADRAO = {
   "Combustível": { ativo: false, limite: "" },
   "Hospedagem": { ativo: false, limite: "" },
   "Materiais e Serviços": { ativo: false, limite: "" },
-  "Passagens": { ativo: false, limite: "" },
+  "Transporte": { ativo: false, limite: "" },
 };
 // Tipos cujo aviso de valor acima da política pergunta "quantas pessoas" e,
 // se houver mais de uma, multiplica o limite por esse número antes de decidir
@@ -61,7 +61,7 @@ const TIPO_COR = {
   "Combustível": "#1baf7a",
   "Hospedagem": "#eda100",
   "Materiais e Serviços": "#e87ba4",
-  "Passagens": "#008300",
+  "Transporte": "#008300",
 };
 
 // Mistura a cor com branco (alvo 255) ou preto (alvo 0). Feito em JS, e não
