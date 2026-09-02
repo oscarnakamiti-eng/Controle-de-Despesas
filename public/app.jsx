@@ -1810,46 +1810,48 @@ ${paginasHtml}
             </button>
           </div>
 
-          <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
-            <h2 className="font-display text-lg font-bold">Políticas</h2>
-            <p className="mt-1 text-xs text-slate-500">Valor limite por lançamento, por tipo de despesa. Acima do limite, o app pede confirmação (ou correção) na hora de lançar.</p>
-            <div className="mt-3 space-y-2">
-              {TIPOS.map((tipo) => {
-                const politica = politicaDoTipo(profile, tipo);
-                return (
-                  <div key={tipo} className="flex items-center gap-3 rounded border border-slate-200 px-3 py-2">
-                    <button
-                      type="button" role="switch" aria-checked={politica.ativo}
-                      onClick={() => setProfile({ ...profile, politicas: { ...profile.politicas, [tipo]: { ...politica, ativo: !politica.ativo } } })}
-                      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${politica.ativo ? "bg-amber-500" : "bg-slate-300"}`}>
-                      {/* left-0.5 é obrigatório: sem ancorar à esquerda, o
-                          navegador usa a posição estática, que num <button>
-                          (text-align: center por padrão) cai no meio do
-                          trilho e joga a bolinha para fora dele. */}
-                      <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${politica.ativo ? "translate-x-4" : "translate-x-0"}`} />
-                    </button>
-                    <span className="min-w-0 flex-1 truncate text-sm text-slate-700" title={tipo}>{tipo}</span>
-                    {politica.ativo ? (
-                      <input
-                        value={politica.limite}
-                        onChange={(e) => setProfile({ ...profile, politicas: { ...profile.politicas, [tipo]: { ...politica, limite: e.target.value } } })}
-                        onBlur={() => setProfile((prev) => {
-                          const atual = politicaDoTipo(prev, tipo);
-                          return { ...prev, politicas: { ...prev.politicas, [tipo]: { ...atual, limite: formatValor(parseValorInput(atual.limite)) } } };
-                        })}
-                        placeholder="0,00" inputMode="decimal"
-                        className="w-24 shrink-0 rounded border border-slate-300 px-2 py-1 text-right text-sm font-mono-num sm:w-28" />
-                    ) : (
-                      <span className="shrink-0 text-xs text-slate-400">Sem limite</span>
-                    )}
-                  </div>
-                );
-              })}
+          {souAdmin && (
+            <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
+              <h2 className="font-display text-lg font-bold">Políticas</h2>
+              <p className="mt-1 text-xs text-slate-500">Valor limite por lançamento, por tipo de despesa. Acima do limite, o app pede confirmação (ou correção) na hora de lançar.</p>
+              <div className="mt-3 space-y-2">
+                {TIPOS.map((tipo) => {
+                  const politica = politicaDoTipo(profile, tipo);
+                  return (
+                    <div key={tipo} className="flex items-center gap-3 rounded border border-slate-200 px-3 py-2">
+                      <button
+                        type="button" role="switch" aria-checked={politica.ativo}
+                        onClick={() => setProfile({ ...profile, politicas: { ...profile.politicas, [tipo]: { ...politica, ativo: !politica.ativo } } })}
+                        className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${politica.ativo ? "bg-amber-500" : "bg-slate-300"}`}>
+                        {/* left-0.5 é obrigatório: sem ancorar à esquerda, o
+                            navegador usa a posição estática, que num <button>
+                            (text-align: center por padrão) cai no meio do
+                            trilho e joga a bolinha para fora dele. */}
+                        <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${politica.ativo ? "translate-x-4" : "translate-x-0"}`} />
+                      </button>
+                      <span className="min-w-0 flex-1 truncate text-sm text-slate-700" title={tipo}>{tipo}</span>
+                      {politica.ativo ? (
+                        <input
+                          value={politica.limite}
+                          onChange={(e) => setProfile({ ...profile, politicas: { ...profile.politicas, [tipo]: { ...politica, limite: e.target.value } } })}
+                          onBlur={() => setProfile((prev) => {
+                            const atual = politicaDoTipo(prev, tipo);
+                            return { ...prev, politicas: { ...prev.politicas, [tipo]: { ...atual, limite: formatValor(parseValorInput(atual.limite)) } } };
+                          })}
+                          placeholder="0,00" inputMode="decimal"
+                          className="w-24 shrink-0 rounded border border-slate-300 px-2 py-1 text-right text-sm font-mono-num sm:w-28" />
+                      ) : (
+                        <span className="shrink-0 text-xs text-slate-400">Sem limite</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <button onClick={saveProfile} className="mt-4 inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
+                <CheckIcon size={16} /> Salvar políticas
+              </button>
             </div>
-            <button onClick={saveProfile} className="mt-4 inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
-              <CheckIcon size={16} /> Salvar políticas
-            </button>
-          </div>
+          )}
 
           <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
             <h2 className="font-display text-lg font-bold">Assinatura</h2>
