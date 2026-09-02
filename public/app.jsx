@@ -45,8 +45,13 @@ const POLITICAS_PADRAO = {
 // se ainda precisa corrigir o valor.
 const TIPOS_COM_PESSOAS = ["Almoço", "Jantar", "Hospedagem"];
 
-function politicaDoTipo(profile, tipo) {
-  const p = profile && profile.politicas && profile.politicas[tipo];
+// `politicas` é uma configuração GLOBAL (compartilhada por todos os
+// usuários, gerenciada só pelo admin — ver netlify/functions/politicas.mjs),
+// diferente do `profile`, que é por usuário. Antes de existir essa
+// configuração global (ou enquanto o admin não personaliza nada), cai no
+// mesmo padrão de sempre: Almoço/Jantar com teto de 35,00, os demais sem limite.
+function politicaDoTipo(politicas, tipo) {
+  const p = politicas && politicas[tipo];
   return p || POLITICAS_PADRAO[tipo] || { ativo: false, limite: "" };
 }
 
@@ -550,6 +555,7 @@ function App() {
   const [records, setRecords] = useState([]);
   const [recordsEtag, setRecordsEtag] = useState(null);
   const [profile, setProfile] = useState({});
+  const [politicas, setPoliticas] = useState({}); // global, gerenciada só pelo admin — ver politicas.mjs
   const [usuarioNome, setUsuarioNome] = useState("");
   const [souAdmin, setSouAdmin] = useState(false);
   const [usuarios, setUsuarios] = useState([]);
@@ -627,12 +633,13 @@ function App() {
     if (!CODIGO_USUARIO) { setLoaded(true); return; }
     (async () => {
       try {
-        const [r, p, rp, rc] = await Promise.all([apiGet("records"), apiGet("profile"), apiGet("rateio"), apiGet("rascunho")]);
+        const [r, p, rp, rc, pol] = await Promise.all([apiGet("records"), apiGet("profile"), apiGet("rateio"), apiGet("rascunho"), apiGet("politicas")]);
         setRecords(r.records || []);
         setRecordsEtag(r.etag ?? null);
         setProfile(p.profile || {});
         setUsuarioNome(p.usuario || "");
         setSouAdmin(!!p.admin);
+        setPoliticas(pol.politicas || {});
         setPresets(rp.presets || []);
         const rascunho = rc.rascunho || {};
         setMotivo(rascunho.motivo || "");
@@ -786,7 +793,7 @@ function App() {
   // por esse número antes de decidir se o valor ainda precisa ser corrigido.
   const confirmarAvisoLimite = (incluirPessoas) => {
     const rec = records.find((r) => r.id === avisoLimite.id);
-    const limite = rec ? parseValorInput(politicaDoTipo(profile, rec.tipo).limite) : 0;
+    const limite = rec ? parseValorInput(politicaDoTipo(politicas, rec.tipo).limite) : 0;
     if (incluirPessoas) {
       const pessoas = parseInt(avisoLimite.pessoas, 10) || 1;
       const efetivo = limite * pessoas;
@@ -816,7 +823,7 @@ function App() {
   const manterAvisoLimite = () => setAvisoLimite(null);
   const corrigirAvisoLimite = () => {
     const rec = records.find((r) => r.id === avisoLimite.id);
-    const limite = rec ? parseValorInput(politicaDoTipo(profile, rec.tipo).limite) : 0;
+    const limite = rec ? parseValorInput(politicaDoTipo(politicas, rec.tipo).limite) : 0;
     setRecords((prev) => prev.map((r) => r.id === avisoLimite.id ? { ...r, valor: limite } : r));
     setAvisoLimite(null);
   };
@@ -872,7 +879,7 @@ function App() {
           valor, fileName: file.name, mediaType, hasFile: !!fileStored, pages,
           status: needsReview ? "revisar" : "ok",
         }]);
-        const politicaTipo = politicaDoTipo(profile, tipo);
+        const politicaTipo = politicaDoTipo(politicas, tipo);
         const limitePolitica = parseValorInput(politicaTipo.limite);
         if (politicaTipo.ativo && limitePolitica > 0 && valor > limitePolitica) {
           setFilaAvisoLimite((prev) => [...prev, recId]);
@@ -966,6 +973,10 @@ function App() {
   };
   const savePresets = async () => {
     try { await apiPost("rateio", { presets }); showToast("Presets de rateio salvos."); }
+    catch (e) { showToast(`Erro ao salvar: ${e.message}`, true); }
+  };
+  const savePoliticas = async () => {
+    try { await apiPost("politicas", { politicas }); showToast("Políticas salvas para todos os usuários."); }
     catch (e) { showToast(`Erro ao salvar: ${e.message}`, true); }
   };
 
@@ -1607,7 +1618,7 @@ ${paginasHtml}
                   <Fragment key={w.monday.getTime()}>
                     <tr><td colSpan={6} className="bg-slate-800 px-3 py-1.5 font-display text-xs uppercase tracking-wide text-amber-300">Semana de {w.label}</td></tr>
                     {w.rows.map((r) => {
-                      const politicaLinha = politicaDoTipo(profile, r.tipo);
+                      const politicaLinha = politicaDoTipo(politicas, r.tipo);
                       const limitePoliticaLinha = parseValorInput(politicaLinha.limite);
                       const overLimit = politicaLinha.ativo && limitePoliticaLinha > 0 && r.valor > limitePoliticaLinha;
                       if (editingId === r.id && editDraft) {
@@ -1816,12 +1827,12 @@ ${paginasHtml}
               <p className="mt-1 text-xs text-slate-500">Valor limite por lançamento, por tipo de despesa. Acima do limite, o app pede confirmação (ou correção) na hora de lançar.</p>
               <div className="mt-3 space-y-2">
                 {TIPOS.map((tipo) => {
-                  const politica = politicaDoTipo(profile, tipo);
+                  const politica = politicaDoTipo(politicas, tipo);
                   return (
                     <div key={tipo} className="flex items-center gap-3 rounded border border-slate-200 px-3 py-2">
                       <button
                         type="button" role="switch" aria-checked={politica.ativo}
-                        onClick={() => setProfile({ ...profile, politicas: { ...profile.politicas, [tipo]: { ...politica, ativo: !politica.ativo } } })}
+                        onClick={() => setPoliticas({ ...politicas, [tipo]: { ...politica, ativo: !politica.ativo } })}
                         className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${politica.ativo ? "bg-amber-500" : "bg-slate-300"}`}>
                         {/* left-0.5 é obrigatório: sem ancorar à esquerda, o
                             navegador usa a posição estática, que num <button>
@@ -1833,10 +1844,10 @@ ${paginasHtml}
                       {politica.ativo ? (
                         <input
                           value={politica.limite}
-                          onChange={(e) => setProfile({ ...profile, politicas: { ...profile.politicas, [tipo]: { ...politica, limite: e.target.value } } })}
-                          onBlur={() => setProfile((prev) => {
+                          onChange={(e) => setPoliticas({ ...politicas, [tipo]: { ...politica, limite: e.target.value } })}
+                          onBlur={() => setPoliticas((prev) => {
                             const atual = politicaDoTipo(prev, tipo);
-                            return { ...prev, politicas: { ...prev.politicas, [tipo]: { ...atual, limite: formatValor(parseValorInput(atual.limite)) } } };
+                            return { ...prev, [tipo]: { ...atual, limite: formatValor(parseValorInput(atual.limite)) } };
                           })}
                           placeholder="0,00" inputMode="decimal"
                           className="w-24 shrink-0 rounded border border-slate-300 px-2 py-1 text-right text-sm font-mono-num sm:w-28" />
@@ -1847,7 +1858,8 @@ ${paginasHtml}
                   );
                 })}
               </div>
-              <button onClick={saveProfile} className="mt-4 inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
+              <p className="mt-3 text-xs text-slate-400">Essa configuração é única para todos os usuários do sistema.</p>
+              <button onClick={savePoliticas} className="mt-2 inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
                 <CheckIcon size={16} /> Salvar políticas
               </button>
             </div>
@@ -2106,7 +2118,7 @@ ${paginasHtml}
       {avisoLimite && (() => {
         const rec = records.find((r) => r.id === avisoLimite.id);
         if (!rec) return null;
-        const limite = parseValorInput(politicaDoTipo(profile, rec.tipo).limite);
+        const limite = parseValorInput(politicaDoTipo(politicas, rec.tipo).limite);
         const comPessoas = TIPOS_COM_PESSOAS.includes(rec.tipo);
         return (
           <div className="no-print fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
