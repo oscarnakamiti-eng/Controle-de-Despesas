@@ -21,8 +21,9 @@ export default async (req) => {
   if (req.method === "GET") {
     const profile = (await store.get(KEY, { type: "json" })) || {};
     // Devolve também o nome de login, pro app mostrar quem está conectado
-    // (funciona pra quem entrou pelo login e pra quem já tinha o acesso salvo).
-    return json({ profile, usuario: registro.nome || "" });
+    // (funciona pra quem entrou pelo login e pra quem já tinha o acesso salvo),
+    // e a flag de admin, pra decidir se mostra a aba "Usuários".
+    return json({ profile, usuario: registro.nome || "", admin: registro.admin === true });
   }
 
   if (req.method === "POST") {

@@ -155,6 +155,8 @@ const EyeIcon = (p) => <Icon {...p}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10
 const SheetIcon = (p) => <Icon {...p}><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18" /><path d="M3 15h18" /><path d="M9 3v18" /></Icon>;
 const UserIcon = (p) => <Icon {...p}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></Icon>;
 const DownloadIcon = (p) => <Icon {...p}><path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" /></Icon>;
+const CopyIcon = (p) => <Icon {...p}><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></Icon>;
+const ShieldIcon = (p) => <Icon {...p}><path d="M12 2 4 5v6c0 5 3.4 8.4 8 11 4.6-2.6 8-6 8-11V5Z" /></Icon>;
 
 function pad2(n) { return String(n).padStart(2, "0"); }
 function formatDatePtBr(date) { return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${date.getFullYear()}`; }
@@ -549,6 +551,13 @@ function App() {
   const [recordsEtag, setRecordsEtag] = useState(null);
   const [profile, setProfile] = useState({});
   const [usuarioNome, setUsuarioNome] = useState("");
+  const [souAdmin, setSouAdmin] = useState(false);
+  const [usuarios, setUsuarios] = useState([]);
+  const [carregandoUsuarios, setCarregandoUsuarios] = useState(false);
+  const [novoUsuarioNome, setNovoUsuarioNome] = useState("");
+  const [criandoUsuario, setCriandoUsuario] = useState(false);
+  const [renomeandoCodigo, setRenomeandoCodigo] = useState(null);
+  const [renomeandoValor, setRenomeandoValor] = useState("");
   const [presets, setPresets] = useState([]);
   const [assinaturaVersao, setAssinaturaVersao] = useState(0);
   const [temAssinatura, setTemAssinatura] = useState(null); // null = ainda não sabe
@@ -623,6 +632,7 @@ function App() {
         setRecordsEtag(r.etag ?? null);
         setProfile(p.profile || {});
         setUsuarioNome(p.usuario || "");
+        setSouAdmin(!!p.admin);
         setPresets(rp.presets || []);
         const rascunho = rc.rascunho || {};
         setMotivo(rascunho.motivo || "");
@@ -957,6 +967,91 @@ function App() {
   const savePresets = async () => {
     try { await apiPost("rateio", { presets }); showToast("Presets de rateio salvos."); }
     catch (e) { showToast(`Erro ao salvar: ${e.message}`, true); }
+  };
+
+  // Aba "Usuários" — só carregada/visível para quem está logado com admin: true.
+  const carregarUsuarios = useCallback(async () => {
+    setCarregandoUsuarios(true);
+    try {
+      const data = await apiGet("usuarios");
+      setUsuarios(data.usuarios || []);
+    } catch (e) {
+      showToast(`Erro ao carregar usuários: ${e.message}`, true);
+    } finally {
+      setCarregandoUsuarios(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (view === "usuarios" && souAdmin) carregarUsuarios();
+  }, [view, souAdmin, carregarUsuarios]);
+
+  const copiarLink = async (codigo) => {
+    const url = `${location.origin}/?u=${codigo}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      showToast("Link copiado.");
+    } catch {
+      showToast(url);
+    }
+  };
+
+  const criarNovoUsuario = async (e) => {
+    e.preventDefault();
+    const nome = novoUsuarioNome.trim();
+    if (!nome) return;
+    setCriandoUsuario(true);
+    try {
+      const data = await apiPost("usuarios", { acao: "criar", nome });
+      setNovoUsuarioNome("");
+      await carregarUsuarios();
+      await copiarLink(data.codigo);
+      showToast(`Usuário "${nome}" cadastrado. Link copiado para a área de transferência.`);
+    } catch (e) {
+      showToast(`Erro ao cadastrar: ${e.message}`, true);
+    } finally {
+      setCriandoUsuario(false);
+    }
+  };
+
+  const revogarUsuarioAcao = async (codigo, nome) => {
+    if (!confirm(`Revogar o acesso de "${nome}"? O link atual dela deixa de funcionar.`)) return;
+    try {
+      await apiPost("usuarios", { acao: "revogar", codigo });
+      await carregarUsuarios();
+      showToast(`Acesso de "${nome}" revogado.`);
+    } catch (e) {
+      showToast(`Erro ao revogar: ${e.message}`, true);
+    }
+  };
+
+  const regenerarUsuarioAcao = async (codigo, nome) => {
+    try {
+      const data = await apiPost("usuarios", { acao: "regenerar", codigo });
+      await carregarUsuarios();
+      await copiarLink(data.codigo);
+      showToast(`Novo link de "${nome}" copiado. O link antigo parou de funcionar.`);
+    } catch (e) {
+      showToast(`Erro ao gerar novo link: ${e.message}`, true);
+    }
+  };
+
+  const iniciarRenomear = (codigo, nomeAtual) => {
+    setRenomeandoCodigo(codigo);
+    setRenomeandoValor(nomeAtual);
+  };
+
+  const confirmarRenomear = async (codigo) => {
+    const novoNome = renomeandoValor.trim();
+    if (!novoNome) return;
+    try {
+      await apiPost("usuarios", { acao: "renomear", codigo, novoNome });
+      setRenomeandoCodigo(null);
+      await carregarUsuarios();
+      showToast("Nome de usuário atualizado.");
+    } catch (e) {
+      showToast(`Erro ao renomear: ${e.message}`, true);
+    }
   };
 
   const enviarAssinatura = async (file) => {
@@ -1370,6 +1465,7 @@ ${paginasHtml}
             <NavBtn id="gerar">Formulários</NavBtn>
             <NavBtn id="relatorio">Imagens</NavBtn>
             <NavBtn id="perfil">Cadastros</NavBtn>
+            {souAdmin && <NavBtn id="usuarios">Usuários</NavBtn>}
           </nav>
         </div>
         <div className="h-1 w-full bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500" />
@@ -1800,6 +1896,95 @@ ${paginasHtml}
                 Usar no formulário
               </button>
             </div>
+          </div>
+        </main>
+      )}
+
+      {/* ===================== USUÁRIOS (só admin) ===================== */}
+      {view === "usuarios" && souAdmin && (
+        <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
+          <div className="rounded-lg border border-slate-200 bg-white p-4">
+            <h2 className="font-display text-lg font-bold">Cadastrar novo usuário</h2>
+            <p className="mt-1 text-xs text-slate-500">Cria o acesso e copia o link de entrada para você enviar à pessoa.</p>
+            <form onSubmit={criarNovoUsuario} className="mt-3 flex flex-wrap items-end gap-3">
+              <Field label="Nome de usuário" value={novoUsuarioNome} onChange={setNovoUsuarioNome} placeholder="Nome da pessoa" className="max-w-xs flex-1" />
+              <button type="submit" disabled={criandoUsuario || !novoUsuarioNome.trim()}
+                className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">
+                <PlusIcon size={16} /> {criandoUsuario ? "Cadastrando…" : "Cadastrar"}
+              </button>
+            </form>
+          </div>
+
+          <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-display text-lg font-bold">Usuários cadastrados</h2>
+              <button onClick={carregarUsuarios} title="Recarregar" className="rounded p-1.5 text-slate-500 hover:bg-slate-100">
+                <RefreshIcon size={15} />
+              </button>
+            </div>
+            {carregandoUsuarios ? (
+              <p className="mt-3 text-sm text-slate-400">Carregando…</p>
+            ) : usuarios.length === 0 ? (
+              <p className="mt-3 text-sm text-slate-400">Nenhum usuário cadastrado ainda.</p>
+            ) : (
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-400">
+                      <th className="py-2 pr-3">Nome</th>
+                      <th className="py-2 pr-3">Status</th>
+                      <th className="py-2 pr-3">Cadastrado em</th>
+                      <th className="py-2 pr-3 text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usuarios
+                      .slice()
+                      .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"))
+                      .map((u) => (
+                        <tr key={u.codigo} className="border-b border-slate-100 last:border-0">
+                          <td className="py-2 pr-3">
+                            {renomeandoCodigo === u.codigo ? (
+                              <div className="flex items-center gap-1.5">
+                                <input value={renomeandoValor} onChange={(e) => setRenomeandoValor(e.target.value)}
+                                  autoFocus
+                                  className="w-40 rounded border border-slate-300 px-2 py-1 text-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500" />
+                                <button onClick={() => confirmarRenomear(u.codigo)} title="Confirmar" className="rounded p-1 text-emerald-600 hover:bg-emerald-50"><CheckIcon size={15} /></button>
+                                <button onClick={() => setRenomeandoCodigo(null)} title="Cancelar" className="rounded p-1 text-slate-400 hover:bg-slate-100"><XIcon size={15} /></button>
+                              </div>
+                            ) : (
+                              <span className="flex items-center gap-1.5 font-medium text-slate-700">
+                                {u.nome}
+                                {u.admin && <ShieldIcon size={13} className="shrink-0 text-amber-500" />}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2 pr-3">
+                            {u.revogado ? (
+                              <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">Revogado</span>
+                            ) : (
+                              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">Ativo</span>
+                            )}
+                          </td>
+                          <td className="py-2 pr-3 text-xs text-slate-500">
+                            {u.criadoEm ? new Date(u.criadoEm).toLocaleDateString("pt-BR") : "—"}
+                          </td>
+                          <td className="py-2 pr-3">
+                            <div className="flex items-center justify-end gap-1">
+                              <button onClick={() => copiarLink(u.codigo)} title="Copiar link de acesso" className="rounded p-1.5 text-slate-500 hover:bg-slate-100"><CopyIcon size={15} /></button>
+                              <button onClick={() => iniciarRenomear(u.codigo, u.nome)} title="Renomear" className="rounded p-1.5 text-slate-500 hover:bg-slate-100"><PencilIcon size={15} /></button>
+                              <button onClick={() => regenerarUsuarioAcao(u.codigo, u.nome)} title="Gerar novo link (invalida o antigo)" className="rounded p-1.5 text-slate-500 hover:bg-slate-100"><RefreshIcon size={15} /></button>
+                              {!u.revogado && (
+                                <button onClick={() => revogarUsuarioAcao(u.codigo, u.nome)} title="Revogar acesso" className="rounded p-1.5 text-red-600 hover:bg-red-100"><TrashIcon size={15} /></button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </main>
       )}

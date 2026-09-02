@@ -92,11 +92,82 @@ export function chave(userId, sufixo) {
   return `u:${userId}:${sufixo}`;
 }
 
-class ErroAcesso extends Error {
+export class ErroAcesso extends Error {
   constructor(mensagem, status) {
     super(mensagem);
     this.status = status;
   }
+}
+
+// Regras de negócio do cadastro de usuários, compartilhadas por admin.mjs
+// (protegido pelo ADMIN_TOKEN, usado via curl para o bootstrap) e por
+// usuarios.mjs (auto-serviço na própria interface, restrito a quem já está
+// logado com registro.admin === true). Nenhuma das duas rotas duplica esta
+// lógica — só o jeito de autenticar quem está chamando é diferente.
+
+export async function criarUsuario(nome, { admin = false } = {}) {
+  const nomeLimpo = String(nome || "").trim();
+  if (!nomeLimpo) throw new ErroAcesso("Informe o nome da pessoa.", 400);
+  const existente = await buscarCodigoPorNome(nomeLimpo);
+  if (existente) {
+    const registroExistente = await buscarUsuarioPorCodigo(existente);
+    if (registroExistente && !registroExistente.revogado) {
+      throw new ErroAcesso("Já existe uma pessoa ativa com esse nome de usuário.", 409);
+    }
+  }
+  const codigo = gerarCodigo();
+  const userId = gerarUserId();
+  await gravarUsuario(codigo, { userId, nome: nomeLimpo, criadoEm: new Date().toISOString(), revogado: false, admin: !!admin });
+  await vincularLogin(nomeLimpo, codigo);
+  return { codigo, userId, link: `/?u=${codigo}` };
+}
+
+export async function revogarUsuario(codigo) {
+  const registro = await buscarUsuarioPorCodigo(codigo);
+  if (!registro) throw new ErroAcesso("Código não encontrado.", 404);
+  registro.revogado = true;
+  await gravarUsuario(codigo, registro);
+}
+
+export async function regenerarUsuario(codigoAntigo) {
+  const registro = await buscarUsuarioPorCodigo(codigoAntigo);
+  if (!registro) throw new ErroAcesso("Código não encontrado.", 404);
+  registro.revogado = true;
+  await gravarUsuario(codigoAntigo, registro);
+  const novoCodigo = gerarCodigo();
+  await gravarUsuario(novoCodigo, { userId: registro.userId, nome: registro.nome, criadoEm: registro.criadoEm, revogado: false, admin: registro.admin === true });
+  await vincularLogin(registro.nome, novoCodigo);
+  return { codigo: novoCodigo, userId: registro.userId, link: `/?u=${novoCodigo}` };
+}
+
+export async function renomearUsuario(codigo, novoNome) {
+  const nomeLimpo = String(novoNome || "").trim();
+  if (!nomeLimpo) throw new ErroAcesso("Informe o novo nome de usuário.", 400);
+  const registro = await buscarUsuarioPorCodigo(codigo);
+  if (!registro) throw new ErroAcesso("Código não encontrado.", 404);
+  const existente = await buscarCodigoPorNome(nomeLimpo);
+  if (existente && existente !== codigo) {
+    const registroExistente = await buscarUsuarioPorCodigo(existente);
+    if (registroExistente && !registroExistente.revogado) {
+      throw new ErroAcesso("Já existe uma pessoa ativa com esse nome de usuário.", 409);
+    }
+  }
+  const nomeAntigo = registro.nome;
+  registro.nome = nomeLimpo;
+  await gravarUsuario(codigo, registro);
+  await vincularLogin(nomeLimpo, codigo);
+  if (normalizarNome(nomeAntigo) !== normalizarNome(nomeLimpo)) {
+    await removerLogin(nomeAntigo);
+  }
+  return { nome: nomeLimpo };
+}
+
+export async function definirAdmin(codigo, admin) {
+  const registro = await buscarUsuarioPorCodigo(codigo);
+  if (!registro) throw new ErroAcesso("Código não encontrado.", 404);
+  registro.admin = !!admin;
+  await gravarUsuario(codigo, registro);
+  return { nome: registro.nome, admin: registro.admin };
 }
 
 // Lê ?codigo= da URL da requisição e resolve o cadastro correspondente.

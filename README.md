@@ -83,6 +83,32 @@ Depois disso, cada commit na `main` gera um novo deploy automático.
 2. Aba **Despesas** → arraste os comprovantes em lote → confira as linhas marcadas com ⚠.
 3. Aba **Gerar formulários** → escolha o fluxo → baixe a planilha e o relatório.
 
+## Aba Usuários (administradores)
+
+Quem está logado com a flag `admin: true` no próprio cadastro vê uma aba extra,
+**Usuários**, para cadastrar/renomear/revogar/gerar novo link de acesso das
+pessoas — sem precisar do `ADMIN_TOKEN` nem de curl no dia a dia
+(`netlify/functions/usuarios.mjs`).
+
+Como ninguém nasce administrador, o **primeiro** admin precisa ser promovido
+manualmente por quem tem o `ADMIN_TOKEN` (site owner), via
+`netlify/functions/admin.mjs`:
+
+```bash
+# 1) cadastre a pessoa (se ainda não existir) e pegue o "codigo" da resposta
+curl -H "x-admin-token: $ADMIN_TOKEN" \
+  -X POST https://SEUSITE/.netlify/functions/admin -d '{"acao":"criar","nome":"Fulano"}'
+
+# 2) promova esse código a administrador
+curl -H "x-admin-token: $ADMIN_TOKEN" \
+  -X POST https://SEUSITE/.netlify/functions/admin \
+  -d '{"acao":"definir-admin","codigo":"<codigo devolvido acima>","admin":true}'
+```
+
+Depois disso, a pessoa promovida já pode cadastrar e promover as demais pela
+própria interface — o `ADMIN_TOKEN` fica só para esse bootstrap inicial (ou
+para recuperar o acesso se todos os admins forem revogados por engano).
+
 ## Testar localmente
 
 ```bash
