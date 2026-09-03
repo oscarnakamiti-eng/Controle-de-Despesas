@@ -294,19 +294,30 @@ function makeId() { return `rec-${Date.now()}-${Math.random().toString(36).slice
 function fileUrl(id) { return functionUrl("files", `id=${encodeURIComponent(id)}`); }
 function previewUrl(id, page) { return `${fileUrl(id)}&preview=${page}`; }
 
-// Converte cada página de um PDF em JPEG (via pdf.js) e envia ao servidor,
-// para que a pré-visualização e o relatório fotográfico consigam exibi-las.
-// JPEG em vez de PNG e um teto de dimensão evitam páginas grandes (formulários
-// digitalizados em A3, por ex.) de estourar o limite de payload do servidor.
-async function converterPdfEmImagens(id, base64, onProgress) {
+// Faz o pdf.js carregar o PDF a partir do base64. Separado de
+// converterPdfEmImagens() para poder carregar o arquivo original UMA vez e
+// depois renderizar vários intervalos de página dele (caso de um arquivo
+// consolidado com várias notas fiscais, cada uma virando um lançamento).
+async function carregarPdf(base64) {
   if (!window.pdfjsLib) throw new Error("Biblioteca de PDF não carregou");
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-  const pdf = await window.pdfjsLib.getDocument({ data: bytes }).promise;
-  const total = pdf.numPages;
-  const MAX_DIM = 2200;
+  return window.pdfjsLib.getDocument({ data: bytes }).promise;
+}
 
-  for (let n = 1; n <= total; n++) {
-    if (onProgress) onProgress(n, total);
+// Renderiza as páginas [paginaInicio, paginaFim] (1-based, inclusivas) de um
+// PDF já carregado (ver carregarPdf) em JPEG e envia ao servidor, numerando
+// como página 1, 2, 3... a partir do início do intervalo — é assim que um
+// lançamento separado de um arquivo consolidado guarda só as próprias
+// páginas, sem se importar em que página do arquivo original elas estavam.
+// JPEG em vez de PNG e um teto de dimensão evitam páginas grandes (formulários
+// digitalizados em A3, por ex.) de estourar o limite de payload do servidor.
+async function renderizarPaginasPdf(pdf, id, paginaInicio, paginaFim, onProgress) {
+  const MAX_DIM = 2200;
+  const total = paginaFim - paginaInicio + 1;
+
+  for (let n = paginaInicio; n <= paginaFim; n++) {
+    const destino = n - paginaInicio + 1;
+    if (onProgress) onProgress(destino, total);
     const page = await pdf.getPage(n);
     const base = page.getViewport({ scale: 1 });
     const escala = Math.min(2, MAX_DIM / Math.max(base.width, base.height));  // escala 2 = boa leitura na impressão
@@ -318,11 +329,16 @@ async function converterPdfEmImagens(id, base64, onProgress) {
     const jpeg = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
     const res = await fetch(functionUrl("upload-preview"), {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, page: n, base64: jpeg }),
+      body: JSON.stringify({ id, page: destino, base64: jpeg }),
     });
     await parseJsonResponse(res);
   }
   return total;
+}
+
+async function converterPdfEmImagens(id, base64, onProgress) {
+  const pdf = await carregarPdf(base64);
+  return renderizarPaginasPdf(pdf, id, 1, pdf.numPages, onProgress);
 }
 
 // Detecta uma versão nova do app publicada: compara o ETag do app.jsx que
@@ -848,46 +864,105 @@ function App() {
           if (comprimido) { base64 = comprimido; mediaType = "image/jpeg"; }
         }
         const recId = makeId();
-        const { parsed, fileStored } = await callExtract(recId, base64, mediaType, isPdf, file.name);
+        const { itens, fileStored } = await callExtract(recId, base64, mediaType, isPdf, file.name);
+        const lista = Array.isArray(itens) && itens.length > 0 ? itens : [{}];
 
-        let needsReview = false;
-        let dateObj = parseDatePtBr(parsed && parsed.data);
-        if (!dateObj) { dateObj = new Date(); needsReview = true; }
-        let tipo = parsed && parsed.tipo;
-        if (!TIPOS.includes(tipo)) { tipo = "Materiais e Serviços"; needsReview = true; }
-        let valor = Number(parsed && parsed.valor);
-        if (isNaN(valor)) { valor = 0; needsReview = true; }
-
-        // PDFs viram imagens para poderem ser vistos e impressos no relatório
-        let pages = isPdf ? 0 : 1;
-        let convErro = null;
-        if (isPdf && fileStored) {
-          try {
-            setQueue((prev) => prev.map((q) => (q.qid === qid ? { ...q, status: "convertendo" } : q)));
-            pages = await converterPdfEmImagens(recId, base64, (n, total) => {
-              setQueue((prev) => prev.map((q) => (q.qid === qid ? { ...q, status: "convertendo", progresso: `${n}/${total}` } : q)));
-            });
-          } catch (e) {
-            pages = 0;
-            convErro = String(e.message || e);
+        const registrarAvisoLimite = (id, tipo, valor) => {
+          const politicaTipo = politicaDoTipo(politicas, tipo);
+          const limitePolitica = parseValorInput(politicaTipo.limite);
+          if (politicaTipo.ativo && limitePolitica > 0 && valor > limitePolitica) {
+            setFilaAvisoLimite((prev) => [...prev, id]);
           }
-        }
+        };
 
-        setRecords((prev) => [...prev, {
-          id: recId, data: formatDatePtBr(dateObj), tipo,
-          obs: (parsed && parsed.observacoes) || (needsReview ? "Confira os dados extraídos" : ""),
-          valor, fileName: file.name, mediaType, hasFile: !!fileStored, pages,
-          status: needsReview ? "revisar" : "ok",
-        }]);
-        const politicaTipo = politicaDoTipo(politicas, tipo);
-        const limitePolitica = parseValorInput(politicaTipo.limite);
-        if (politicaTipo.ativo && limitePolitica > 0 && valor > limitePolitica) {
-          setFilaAvisoLimite((prev) => [...prev, recId]);
-        }
-        if (convErro) {
-          setQueue((prev) => prev.map((q) => (q.qid === qid ? { ...q, status: "aviso", error: `lido, mas o PDF não converteu: ${convErro}` } : q)));
+        if (!isPdf || lista.length <= 1) {
+          // ---- caminho de sempre: um arquivo vira um único lançamento ----
+          const it = lista[0] || {};
+          let needsReview = false;
+          let dateObj = parseDatePtBr(it.data);
+          if (!dateObj) { dateObj = new Date(); needsReview = true; }
+          let tipo = it.tipo;
+          if (!TIPOS.includes(tipo)) { tipo = "Materiais e Serviços"; needsReview = true; }
+          let valor = Number(it.valor);
+          if (isNaN(valor)) { valor = 0; needsReview = true; }
+
+          // PDFs viram imagens para poderem ser vistos e impressos no relatório
+          let pages = isPdf ? 0 : 1;
+          let convErro = null;
+          if (isPdf && fileStored) {
+            try {
+              setQueue((prev) => prev.map((q) => (q.qid === qid ? { ...q, status: "convertendo" } : q)));
+              pages = await converterPdfEmImagens(recId, base64, (n, total) => {
+                setQueue((prev) => prev.map((q) => (q.qid === qid ? { ...q, status: "convertendo", progresso: `${n}/${total}` } : q)));
+              });
+            } catch (e) {
+              pages = 0;
+              convErro = String(e.message || e);
+            }
+          }
+
+          setRecords((prev) => [...prev, {
+            id: recId, data: formatDatePtBr(dateObj), tipo,
+            obs: it.observacoes || (needsReview ? "Confira os dados extraídos" : ""),
+            valor, fileName: file.name, mediaType, hasFile: !!fileStored, pages,
+            status: needsReview ? "revisar" : "ok",
+          }]);
+          registrarAvisoLimite(recId, tipo, valor);
+
+          if (convErro) {
+            setQueue((prev) => prev.map((q) => (q.qid === qid ? { ...q, status: "aviso", error: `lido, mas o PDF não converteu: ${convErro}` } : q)));
+          } else {
+            setQueue((prev) => prev.map((q) => (q.qid === qid ? { ...q, status: "ok" } : q)));
+          }
         } else {
-          setQueue((prev) => prev.map((q) => (q.qid === qid ? { ...q, status: "ok" } : q)));
+          // ---- arquivo consolidado: o modelo identificou várias notas
+          // fiscais distintas dentro do mesmo PDF (números/CNPJs/valores
+          // diferentes). Cada uma vira o próprio lançamento, guardando só as
+          // próprias páginas — o arquivo original consolidado não fica
+          // guardado inteiro em nenhum dos lançamentos (ver extract.mjs). ----
+          // Carrega o PDF uma vez só para renderizar todas as notas; se nem
+          // isso funcionar, as notas ainda viram lançamentos (com os dados já
+          // extraídos), só que sem comprovante — o mesmo tipo de degradação
+          // que já existia para uma conversão de PDF com problema, nunca uma
+          // perda silenciosa do que o modelo já leu.
+          let pdfDoc = null;
+          try { pdfDoc = await carregarPdf(base64); } catch { pdfDoc = null; }
+
+          const novosRecords = [];
+          for (let j = 0; j < lista.length; j++) {
+            const it = lista[j];
+            const novoId = makeId();
+            let needsReview = false;
+            let dateObj = parseDatePtBr(it.data);
+            if (!dateObj) { dateObj = new Date(); needsReview = true; }
+            let tipo = it.tipo;
+            if (!TIPOS.includes(tipo)) { tipo = "Materiais e Serviços"; needsReview = true; }
+            let valor = Number(it.valor);
+            if (isNaN(valor)) { valor = 0; needsReview = true; }
+
+            let pages = 0;
+            if (pdfDoc) {
+              try {
+                setQueue((prev) => prev.map((q) => (q.qid === qid ? { ...q, status: "convertendo", progresso: `nota ${j + 1}/${lista.length}` } : q)));
+                pages = await renderizarPaginasPdf(pdfDoc, novoId, it.paginaInicio || 1, it.paginaFim || it.paginaInicio || 1, () => {});
+              } catch {
+                needsReview = true;
+              }
+            } else {
+              needsReview = true;
+            }
+
+            novosRecords.push({
+              id: novoId, data: formatDatePtBr(dateObj), tipo,
+              obs: it.observacoes || (needsReview ? "Confira os dados extraídos" : ""),
+              valor, fileName: `${file.name} (nota ${j + 1} de ${lista.length})`, mediaType,
+              hasFile: pages > 0, pages,
+              status: needsReview ? "revisar" : "ok",
+            });
+          }
+          setRecords((prev) => [...prev, ...novosRecords]);
+          novosRecords.forEach((r) => registrarAvisoLimite(r.id, r.tipo, r.valor));
+          setQueue((prev) => prev.map((q) => (q.qid === qid ? { ...q, status: "aviso", error: `${lista.length} lançamentos identificados e separados automaticamente neste arquivo.` } : q)));
         }
         continue;
       } catch (err) {
@@ -895,7 +970,7 @@ function App() {
       }
     }
     setProcessing(false);
-  }, [profile]);
+  }, [politicas]);
 
   const onFileInputChange = (e) => { processFiles(e.target.files); e.target.value = ""; };
   const onDrop = (e) => { e.preventDefault(); dropRef.current?.classList.remove("border-amber-500", "bg-amber-50"); processFiles(e.dataTransfer.files); };

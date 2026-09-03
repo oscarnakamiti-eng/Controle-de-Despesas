@@ -140,6 +140,18 @@ A função devolve um JSON dizendo se a variável chegou à função, se tem esp
 se o prefixo está certo, e faz um teste real contra a API — sem nunca exibir a chave.
 O campo `diagnostico` indica o que corrigir.
 
+## Arquivos consolidados (mais de uma nota fiscal no mesmo PDF)
+
+Quando alguém digitaliza várias notas fiscais diferentes juntas em um único
+PDF de várias páginas, `extract.mjs` identifica cada nota separadamente (pelo
+número, CNPJ do emissor ou valor — nunca separa as páginas de UMA MESMA nota)
+e o app já lança cada uma como um lançamento independente, cada um com só as
+próprias páginas como comprovante. Um PDF normal, de um único comprovante
+(a grande maioria), continua exatamente como sempre — vira um único
+lançamento. Qualquer inconsistência no que o modelo devolver (páginas faltando,
+sobrepostas etc.) cai automaticamente nesse comportamento de sempre, nunca
+perde nem duplica uma página.
+
 ## Comprovantes em PDF
 
 PDFs são convertidos em imagem no próprio navegador (pdf.js) no momento do envio,
